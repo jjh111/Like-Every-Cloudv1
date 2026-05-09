@@ -57,6 +57,7 @@ export async function start(container: HTMLElement): Promise<void> {
     activeCamera = next;
     activeCamera.init();
   };
+  const getActiveCamera = () => activeCamera;
 
   // Everything state-tagged lives under contentRoot.
   // GLBs from /public/scene/* land here once the asset pipeline produces them.
@@ -78,10 +79,10 @@ export async function start(container: HTMLElement): Promise<void> {
   // (chosen with the client) can swap in here without touching the rest.
   const stateController = new StateController();
   const transitions: Record<string, Transition> = {
+    'opacity-crossfade': new OpacityCrossfade(),
     'instant-swap': new InstantSwap(),
-    'opacity-crossfade (sample)': new OpacityCrossfade(),
   };
-  const initialName = 'instant-swap';
+  const initialName = 'opacity-crossfade';
   let active: Transition = transitions[initialName];
   active.init(scene);
 
@@ -107,6 +108,7 @@ export async function start(container: HTMLElement): Promise<void> {
     cameras,
     setCamera,
     initialCamera: initialCameraName,
+    getActiveCamera,
   });
 
   window.addEventListener('resize', () => {

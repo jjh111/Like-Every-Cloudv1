@@ -9,18 +9,22 @@ export interface DebugDeps {
   setTransition: (name: string) => void;
   initialTransition: string;
   cameras: Record<string, CameraMode>;
-  setCamera: (name: string) => void;
   initialCamera: string;
+  setCamera: (name: string) => void;
+  getActiveCamera: () => CameraMode;
 }
+
+type Controller = ReturnType<GUI['add']>;
 
 export function createDebugPanel(deps: DebugDeps): GUI {
   const gui = new GUI({ title: 'LEC dev panel' });
 
-  const stateFolder = gui.addFolder('State');
   const proxy = {
     target: deps.state.target,
     progress: deps.state.progress,
     duration: deps.state.duration,
+    transition: deps.initialTransition,
+    camera: deps.initialCamera,
     snapPast: () => {
       deps.state.duration = 0;
       deps.state.setTarget('past');
@@ -39,38 +43,44 @@ export function createDebugPanel(deps: DebugDeps): GUI {
     })(),
   };
 
-  stateFolder
-    .add(proxy, 'target', ['past', 'present'])
+  gui.add(proxy, 'target', ['past', 'present'])
     .onChange((v: 'past' | 'present') => deps.state.setTarget(v))
     .listen();
-  stateFolder
-    .add(proxy, 'progress', 0, 1, 0.001)
+  gui.add(proxy, 'progress', 0, 1, 0.001)
     .onChange((v: number) => deps.state.setProgress(v))
     .listen();
-  stateFolder
-    .add(proxy, 'duration', 0, 5, 0.1)
-    .onChange((v: number) => {
-      deps.state.duration = v;
-    });
-  stateFolder.add(proxy, 'snapPast').name('snap → past');
-  stateFolder.add(proxy, 'snapPresent').name('snap → present');
-  stateFolder.add(proxy, 'animateOther').name('animate to other');
+  gui.add(proxy, 'duration', 0, 5, 0.1)
+    .onChange((v: number) => { deps.state.duration = v; });
+  gui.add(proxy, 'snapPast').name('snap → past');
+  gui.add(proxy, 'snapPresent').name('snap → present');
+  gui.add(proxy, 'animateOther').name('animate to other');
 
-  const transitionFolder = gui.addFolder('Transition');
-  const tProxy = { name: deps.initialTransition };
-  transitionFolder
-    .add(tProxy, 'name', Object.keys(deps.transitions))
-    .name('strategy')
+  gui.add(proxy, 'transition', Object.keys(deps.transitions))
     .onChange((v: string) => deps.setTransition(v));
 
-  const cameraFolder = gui.addFolder('Camera');
-  const cProxy = { name: deps.initialCamera };
-  cameraFolder
-    .add(cProxy, 'name', Object.keys(deps.cameras))
-    .name('mode')
-    .onChange((v: string) => deps.setCamera(v));
+  gui.add(proxy, 'camera', Object.keys(deps.cameras))
+    .name('camera mode')
+    .onChange((v: string) => {
+      deps.setCamera(v);
+      refreshTunables();
+    });
 
-  // Keep proxy in sync so .listen() reflects external changes (auto-tick).
+  let tunableControllers: Controller[] = [];
+
+  function refreshTunables() {
+    for (const c of tunableControllers) c.destroy();
+    tunableControllers = [];
+    const { target, specs } = deps.getActiveCamera().getTunables();
+    for (const s of specs) {
+      const c = gui
+        .add(target as Record<string, number>, s.key, s.min, s.max, s.step)
+        .name(s.label)
+        .listen();
+      tunableControllers.push(c);
+    }
+  }
+  refreshTunables();
+
   setInterval(() => {
     proxy.target = deps.state.target;
     proxy.progress = deps.state.progress;

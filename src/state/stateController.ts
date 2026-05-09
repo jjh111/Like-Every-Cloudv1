@@ -6,7 +6,7 @@ export class StateController {
   current: StateName = 'past';
   target: StateName = 'past';
   progress = 1;
-  duration = 0;
+  duration = 1;
 
   setTarget(target: StateName): void {
     if (target === this.target) return;
