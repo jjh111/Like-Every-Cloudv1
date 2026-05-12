@@ -3,3 +3,9 @@ dist/
 .vite/
 .DS_Store
 *.log
+
+# Local-only MCP config (machine-specific server URLs).
+.mcp.json
+
+# User-marked working folders.
+Working - gitignore/

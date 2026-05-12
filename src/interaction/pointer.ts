@@ -1,21 +1,40 @@
 import { Raycaster, Vector2, type Camera, type Object3D } from 'three';
 import { getHeroId, isInteractive } from '../scene/tagging';
+import type { PointerEventName } from './actions';
 
-export type PointerHandler = (info: { object: Object3D; heroId?: string }) => void;
+export interface PointerEventInfo {
+  object: Object3D;
+  heroId?: string;
+}
+
+export type PointerEventHandler = (info: PointerEventInfo) => void;
 
 export class PointerInteraction {
   private raycaster = new Raycaster();
   private pointer = new Vector2();
   private hovered: Object3D | null = null;
 
-  onClick: PointerHandler | null = null;
-  onHover: PointerHandler | null = null;
+  private listeners: Record<PointerEventName, PointerEventHandler[]> = {
+    click: [],
+    hoverIn: [],
+    hoverOut: [],
+  };
 
   constructor(
     private domElement: HTMLElement,
     private camera: Camera,
     private root: Object3D,
   ) {}
+
+  /** Subscribe. Returns an unsubscribe function. */
+  on(event: PointerEventName, handler: PointerEventHandler): () => void {
+    this.listeners[event].push(handler);
+    return () => {
+      const arr = this.listeners[event];
+      const i = arr.indexOf(handler);
+      if (i >= 0) arr.splice(i, 1);
+    };
+  }
 
   attach(): void {
     this.domElement.addEventListener('pointermove', this.handleMove);
@@ -46,19 +65,28 @@ export class PointerInteraction {
     return null;
   }
 
+  private emit(event: PointerEventName, info: PointerEventInfo) {
+    for (const fn of this.listeners[event]) fn(info);
+  }
+
   private handleMove = (e: PointerEvent) => {
     this.setPointerFromEvent(e);
     const hit = this.firstInteractiveHit();
     if (hit !== this.hovered) {
+      if (this.hovered) {
+        this.emit('hoverOut', { object: this.hovered, heroId: getHeroId(this.hovered) });
+      }
       this.hovered = hit;
       this.domElement.style.cursor = hit ? 'pointer' : 'default';
-      if (hit && this.onHover) this.onHover({ object: hit, heroId: getHeroId(hit) });
+      if (hit) {
+        this.emit('hoverIn', { object: hit, heroId: getHeroId(hit) });
+      }
     }
   };
 
   private handleClick = (e: MouseEvent) => {
     this.setPointerFromEvent(e);
     const hit = this.firstInteractiveHit();
-    if (hit && this.onClick) this.onClick({ object: hit, heroId: getHeroId(hit) });
+    if (hit) this.emit('click', { object: hit, heroId: getHeroId(hit) });
   };
 }

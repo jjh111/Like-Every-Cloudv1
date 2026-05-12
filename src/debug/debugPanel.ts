@@ -2,6 +2,7 @@ import GUI from 'lil-gui';
 import type { StateController } from '../state/stateController';
 import type { Transition } from '../transitions/transition';
 import type { CameraMode } from '../camera/cameraMode';
+import type { AudioManager } from '../audio/audioManager';
 
 export interface DebugDeps {
   state: StateController;
@@ -12,6 +13,7 @@ export interface DebugDeps {
   initialCamera: string;
   setCamera: (name: string) => void;
   getActiveCamera: () => CameraMode;
+  audio: AudioManager;
 }
 
 type Controller = ReturnType<GUI['add']>;
@@ -58,6 +60,38 @@ export function createDebugPanel(deps: DebugDeps): GUI {
   gui.add(proxy, 'transition', Object.keys(deps.transitions))
     .onChange((v: string) => deps.setTransition(v));
 
+  // Audio cluster — sits between state/transition and camera, so each section
+  // is contiguous rather than camera being split by audio sliders.
+  const audioProxy = {
+    muted: deps.audio.muted,
+    master: deps.audio.getMasterVolume(),
+    ambient: deps.audio.getChannelVolume('ambient'),
+    music: deps.audio.getChannelVolume('music'),
+    narration: deps.audio.getChannelVolume('narration'),
+    sfx: deps.audio.getChannelVolume('sfx'),
+    resume: () => { void deps.audio.resume(); },
+  };
+  gui.add(audioProxy, 'muted')
+    .name('muted')
+    .onChange((v: boolean) => deps.audio.setMuted(v))
+    .listen();
+  gui.add(audioProxy, 'master', 0, 1, 0.01)
+    .name('master vol')
+    .onChange((v: number) => deps.audio.setMasterVolume(v));
+  gui.add(audioProxy, 'ambient', 0, 1, 0.01)
+    .name('ambient vol')
+    .onChange((v: number) => deps.audio.setChannelVolume('ambient', v));
+  gui.add(audioProxy, 'music', 0, 1, 0.01)
+    .name('music vol')
+    .onChange((v: number) => deps.audio.setChannelVolume('music', v));
+  gui.add(audioProxy, 'narration', 0, 1, 0.01)
+    .name('narration vol')
+    .onChange((v: number) => deps.audio.setChannelVolume('narration', v));
+  gui.add(audioProxy, 'sfx', 0, 1, 0.01)
+    .name('sfx vol')
+    .onChange((v: number) => deps.audio.setChannelVolume('sfx', v));
+  gui.add(audioProxy, 'resume').name('resume audio');
+
   gui.add(proxy, 'camera', Object.keys(deps.cameras))
     .name('camera mode')
     .onChange((v: string) => {
@@ -85,6 +119,7 @@ export function createDebugPanel(deps: DebugDeps): GUI {
     proxy.target = deps.state.target;
     proxy.progress = deps.state.progress;
     proxy.duration = deps.state.duration;
+    audioProxy.muted = deps.audio.muted;
   }, 100);
 
   return gui;

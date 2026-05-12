@@ -1,4 +1,4 @@
-import { Group, Vector3 } from 'three';
+import { Group, Mesh, type MeshStandardMaterial, type Object3D, Vector3 } from 'three';
 import { createCamera, createRenderer, createScene } from './scene/sceneGraph';
 import type { CameraMode } from './camera/cameraMode';
 import { FreeformMode } from './camera/freeformMode';
@@ -10,7 +10,12 @@ import type { Transition } from './transitions/transition';
 import { GLBLoader } from './loaders/glbLoader';
 import { HeroLoader } from './loaders/heroLoader';
 import { PointerInteraction } from './interaction/pointer';
+import { InteractionEngine } from './interaction/engine';
+import { RULES } from './interaction/rules';
+import { AudioManager } from './audio/audioManager';
+import { AUDIO_ASSETS } from './audio/manifest';
 import { buildPlaceholderScene } from './placeholder/placeholderScene';
+import { getHeroId } from './scene/tagging';
 import { createDebugPanel } from './debug/debugPanel';
 
 export async function start(container: HTMLElement): Promise<void> {
@@ -20,8 +25,7 @@ export async function start(container: HTMLElement): Promise<void> {
   renderer.setSize(window.innerWidth, window.innerHeight);
   container.appendChild(renderer.domElement);
 
-  // Camera modes — pluggable like transitions. Eventual UX will likely be rails;
-  // freeform stays around for debug & exploration.
+  // Camera modes — pluggable like transitions.
   const lookAtCenter = new Vector3(0, 1.6, 0);
   const railsPath: Vector3[] = [
     new Vector3(0, 1.6, 2.5),
@@ -59,24 +63,35 @@ export async function start(container: HTMLElement): Promise<void> {
   };
   const getActiveCamera = () => activeCamera;
 
-  // Everything state-tagged lives under contentRoot.
-  // GLBs from /public/scene/* land here once the asset pipeline produces them.
+  // Content root + hero lookup table (heroId -> Object3D).
   const contentRoot = new Group();
   scene.add(contentRoot);
 
-  for (const obj of buildPlaceholderScene()) contentRoot.add(obj);
+  const heroLookup = new Map<string, Object3D>();
+  const indexHeroes = (objects: Object3D[]) => {
+    for (const root of objects) {
+      root.traverse((obj) => {
+        const id = getHeroId(obj);
+        if (id) heroLookup.set(id, obj);
+      });
+    }
+  };
+
+  const placeholders = buildPlaceholderScene();
+  for (const obj of placeholders) contentRoot.add(obj);
+  indexHeroes(placeholders);
 
   const glb = new GLBLoader();
   const heroes = new HeroLoader(glb);
   try {
     const heroObjects = await heroes.loadFromManifest('/heroes/manifest.json');
     for (const h of heroObjects) contentRoot.add(h);
+    indexHeroes(heroObjects);
   } catch (e) {
     console.warn('[heroes] manifest load failed', e);
   }
 
-  // State + transition wiring. Transitions are pluggable so the eventual UX
-  // (chosen with the client) can swap in here without touching the rest.
+  // State + transition wiring.
   const stateController = new StateController();
   const transitions: Record<string, Transition> = {
     'opacity-crossfade': new OpacityCrossfade(),
@@ -95,10 +110,21 @@ export async function start(container: HTMLElement): Promise<void> {
   };
 
   const pointer = new PointerInteraction(renderer.domElement, camera, contentRoot);
-  pointer.onClick = ({ heroId }) => {
-    console.log('[interaction] hero clicked:', heroId);
-  };
   pointer.attach();
+
+  // Audio + interaction engine.
+  const audio = new AudioManager();
+  await Promise.all(AUDIO_ASSETS.map((a) => audio.load(a.id, a.url)));
+
+  const engine = new InteractionEngine({
+    audio,
+    state: stateController,
+    setCamera,
+    pointer,
+    rules: RULES,
+    getObjectByHeroId: (id) => heroLookup.get(id),
+  });
+  engine.arm();
 
   createDebugPanel({
     state: stateController,
@@ -109,7 +135,12 @@ export async function start(container: HTMLElement): Promise<void> {
     setCamera,
     initialCamera: initialCameraName,
     getActiveCamera,
+    audio,
   });
+
+  // Bottom-left audio controls: mute toggle + master volume. Volume slider
+  // is always editable; mute starts on and is the user's "begin" action.
+  createAudioControls(audio);
 
   window.addEventListener('resize', () => {
     const w = window.innerWidth;
@@ -119,6 +150,15 @@ export async function start(container: HTMLElement): Promise<void> {
     renderer.setSize(w, h);
   });
 
+  const updateBoomboxEmissive = (heroId: string, on: boolean): void => {
+    const obj = heroLookup.get(heroId);
+    if (!obj) return;
+    const mesh = obj as Mesh;
+    if (!mesh.isMesh) return;
+    const mat = mesh.material as MeshStandardMaterial;
+    mat.emissiveIntensity = on ? 0.6 : 0;
+  };
+
   let prev = performance.now();
   const tick = (now: number) => {
     const dt = (now - prev) / 1000;
@@ -126,8 +166,86 @@ export async function start(container: HTMLElement): Promise<void> {
     stateController.tick(dt);
     active.update(stateController.context);
     activeCamera.update(dt);
+    audio.syncSpatial(camera);
+
+    const musicActive = audio.isChannelActive('music');
+    const isPast = stateController.current === 'past';
+    updateBoomboxEmissive('hero_boombox_past', musicActive && isPast);
+    updateBoomboxEmissive('hero_boombox_present', musicActive && !isPast);
+
     renderer.render(scene, camera);
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
+}
+
+function createAudioControls(audio: AudioManager): void {
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = [
+    'position: fixed',
+    'bottom: 16px',
+    'left: 16px',
+    'display: flex',
+    'align-items: center',
+    'gap: 10px',
+    'padding: 8px 14px',
+    'background: rgba(15, 15, 15, 0.7)',
+    'color: #ddd',
+    'font: 13px/1.3 system-ui, sans-serif',
+    'border-radius: 999px',
+    'backdrop-filter: blur(6px)',
+    'z-index: 1000',
+    'user-select: none',
+  ].join('; ');
+
+  const muteBtn = document.createElement('button');
+  muteBtn.type = 'button';
+  muteBtn.style.cssText = [
+    'background: none',
+    'border: 1px solid rgba(255,255,255,0.25)',
+    'color: #ddd',
+    'padding: 4px 10px',
+    'border-radius: 999px',
+    'cursor: pointer',
+    'font: inherit',
+    'min-width: 92px',
+  ].join('; ');
+  const renderBtn = () => {
+    muteBtn.textContent = audio.muted ? '🔇 muted' : '🔊 sound on';
+  };
+  renderBtn();
+  muteBtn.addEventListener('click', async () => {
+    try { await audio.resume(); } catch { /* ignored */ }
+    // Auto-bump from near-zero so unmute actually produces sound.
+    if (audio.muted && audio.getMasterVolume() < 0.05) {
+      audio.setMasterVolume(0.7);
+      slider.value = '0.7';
+    }
+    audio.setMuted(!audio.muted);
+    renderBtn();
+  });
+
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.min = '0';
+  slider.max = '1';
+  slider.step = '0.01';
+  slider.value = String(audio.getMasterVolume());
+  slider.style.cssText = 'width: 120px; accent-color: #ddd; cursor: pointer;';
+  slider.addEventListener('input', () => {
+    audio.setMasterVolume(Number(slider.value));
+  });
+
+  wrapper.appendChild(muteBtn);
+  wrapper.appendChild(slider);
+  document.body.appendChild(wrapper);
+
+  // Keep button + slider in sync if mute/volume change elsewhere (dev panel).
+  setInterval(() => {
+    renderBtn();
+    const cur = String(audio.getMasterVolume());
+    if (slider.value !== cur && document.activeElement !== slider) {
+      slider.value = cur;
+    }
+  }, 200);
 }
