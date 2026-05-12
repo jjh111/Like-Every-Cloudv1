@@ -118,16 +118,57 @@ docs/
 
 ## Asset pipeline
 
-Rhino 8 → Blender → glTF → three.js:
+The Rhino reference geometry has been imported into Blender, but most of the shop is being **rebuilt by hand** in Blender rather than cleaned up from the import. Treat the inherited Rhino content as reference — pull bits you want to keep, model the rest fresh.
 
-1. Organize Rhino scene into layer buckets (`PAST/SHELL`, `PAST/PROPS`, `PAST/HEROES`, `PRESENT/*`, `SHARED`).
-2. Split into per-bucket `.3dm`. The Rhino utilities in [scripts/](scripts) help find dense meshes and dedupe.
-3. Mesh in Rhino, delete the NURBS, save the bucket file.
-4. Import into Blender via [`import_3dm`](https://github.com/jesterKing/import_3dm) (avoids the FBX-export step entirely; works on Rhino's trial license). Tag with Custom Properties (`state`, `interactive`, `hero_id`). Link object data for repeated props.
-5. Export each bucket as binary `.glb` with Draco compression + Custom Properties → drop in `public/scene/`.
-6. Heroes export individually with manifest entries → drop in `public/heroes/`.
+### Authoring in Blender
 
-Once GLBs land, replace `buildPlaceholderScene()` in [src/app.ts](src/app.ts) with `GLBLoader` calls.
+Organize per state, with shared architecture in its own collection:
+
+- `PAST/SHELL`, `PAST/PROPS`, `PAST/HEROES`
+- `PRESENT/SHELL`, `PRESENT/PROPS`, `PRESENT/HEROES`
+- `SHARED` — architecture (floor, walls, ceiling) present in both states
+
+For each object that participates in state-swap, set Custom Properties (`Object → Properties → Custom Properties`):
+
+| Property                  | Value                                | Required on   |
+| ------------------------- | ------------------------------------ | ------------- |
+| `state`                   | `"past"` / `"present"` / `"both"`    | every mesh    |
+| `interactive`             | `true`                               | heroes only   |
+| `hero_id`                 | unique string, e.g. `"hero_boombox_past"` | heroes only   |
+| `track_id`                | audio asset id, e.g. `"test_music_3"` | cassettes     |
+| `audio_source_hero_id`    | `hero_id` of the boombox to play through | cassettes  |
+
+Link object data (`Ctrl+L → Object Data`) for any repeated prop (cassettes, books, glasses, tea cups) so the exported GLB only ships one mesh per kind.
+
+### Cassette wall
+
+The cassette wall is **data-driven, not modeled**. Today the runtime spawns 30 cassettes from a `(label, track_id)` table in [src/placeholder/placeholderScene.ts](src/placeholder/placeholderScene.ts). For the real asset:
+
+- Model **one** cassette mesh.
+- Either ship it as a hero and let the runtime spawn the wall from a manifest, or bake the wall directly into a `past_props` / `present_props` GLB with each cassette carrying its own `track_id` and `audio_source_hero_id` Custom Properties.
+
+The first option keeps the wall content editable without re-export.
+
+### Export from Blender
+
+Per-bucket binary `.glb` with Draco compression. Check the glTF exporter dialog:
+
+- ☑️ **Custom Properties** — preserves `state` / `interactive` / `hero_id` / etc. as glTF `userData`
+- ☑️ **Apply Modifiers**
+- Draco compression on, level 6
+
+Files land in:
+
+- `public/scene/past_shell.glb`, `past_props.glb`, `present_shell.glb`, `present_props.glb`, `shared.glb`
+- `public/heroes/<hero_id>.glb`, referenced from `public/heroes/manifest.json`
+
+### Runtime swap-in
+
+Once GLBs land, replace `buildPlaceholderScene()` in [src/app.ts](src/app.ts) with `GLBLoader` calls. The loader is already wired in [src/loaders/glbLoader.ts](src/loaders/glbLoader.ts) and the hero loader in [src/loaders/heroLoader.ts](src/loaders/heroLoader.ts) reads the manifest. No engine changes needed — the interaction rules already match by `hero_id` and prefix, so existing rules keep working as long as `hero_id`s line up.
+
+### Rhino utilities
+
+[`scripts/`](scripts) holds Python tools written against the original 1GB `.3dm` (`find_heavy_meshes.py`, `select_by_id.py`, `select_duplicate_extras.py`, `make_pipeline_diagram.py`). They're kept around for one-off trips back to the Rhino file — handy if you decide to pull a specific scanned mesh out rather than rebuild it.
 
 ## Adjacent audio considerations not yet built
 
