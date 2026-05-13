@@ -8,10 +8,12 @@ import {
   DoubleSide,
   FogExp2,
   Mesh,
+  MeshBasicMaterial,
   Points,
   PointsMaterial,
   type Scene,
   ShaderMaterial,
+  SphereGeometry,
   Vector3,
 } from 'three';
 import type { Atmosphere, AtmosphereContext, AtmosphereTunables } from './atmosphere';
@@ -109,6 +111,8 @@ export class MorningShaft implements Atmosphere {
 
   private shafts: ShaftDef[];
   private cones: { mesh: Mesh; material: ShaderMaterial }[] = [];
+  /** Two handles per shaft: [s0.origin, s0.aim, s1.origin, s1.aim, …]. */
+  private handles: Mesh[] = [];
   private dust: Points | null = null;
   private dustVelocities: Float32Array | null = null;
   private dustCount: number;
@@ -228,6 +232,33 @@ export class MorningShaft implements Atmosphere {
     this.dust.frustumCulled = false; // motes near camera shouldn't pop out
     this.dust.renderOrder = 6;
     ctx.scene.add(this.dust);
+
+    // Per-endpoint handle meshes. Hidden by default; the dev panel surfaces a
+    // dropdown that picks one of these as a TransformControls target. They're
+    // drawn on top (depthTest off + high renderOrder) so they're visible
+    // even when buried inside walls.
+    for (let i = 0; i < this.shafts.length; i++) {
+      const shaft = this.shafts[i];
+      for (const role of ['origin', 'aim'] as const) {
+        const geom = new SphereGeometry(0.08, 14, 12);
+        const mat = new MeshBasicMaterial({
+          color: role === 'origin' ? 0xffd166 : 0x4d96ff,
+          depthTest: false,
+          transparent: true,
+          opacity: 0.85,
+        });
+        const handle = new Mesh(geom, mat);
+        handle.renderOrder = 100;
+        handle.visible = false;
+        handle.position.copy(role === 'origin' ? shaft.origin : shaft.aim);
+        // Tags so app.ts / pointer can recognize / filter these.
+        handle.userData.atmosphereHandle = true;
+        handle.userData.shaftIndex = i;
+        handle.userData.shaftRole = role;
+        ctx.scene.add(handle);
+        this.handles.push(handle);
+      }
+    }
   }
 
   update(ctx: AtmosphereContext, dt: number): void {
@@ -262,6 +293,18 @@ export class MorningShaft implements Atmosphere {
     if (ctx.scene.fog instanceof FogExp2) {
       ctx.scene.fog.density = this.fogDensity;
     }
+
+    // Sync handles -> shaft data. The dev panel attaches TransformControls to
+    // a handle; whatever position the gizmo leaves it at, the cone follows.
+    for (let i = 0; i < this.shafts.length; i++) {
+      const oH = this.handles[i * 2 + 0];
+      const aH = this.handles[i * 2 + 1];
+      if (!oH || !aH) continue;
+      const s = this.shafts[i];
+      if (!oH.position.equals(s.origin) || !aH.position.equals(s.aim)) {
+        this.setShaft(i, oH.position, aH.position, s.radius);
+      }
+    }
   }
 
   dispose(ctx: AtmosphereContext): void {
@@ -271,6 +314,12 @@ export class MorningShaft implements Atmosphere {
       cone.material.dispose();
     }
     this.cones = [];
+    for (const handle of this.handles) {
+      ctx.scene.remove(handle);
+      handle.geometry.dispose();
+      (handle.material as MeshBasicMaterial).dispose();
+    }
+    this.handles = [];
     if (this.dust) {
       ctx.scene.remove(this.dust);
       this.dust.geometry.dispose();
@@ -298,7 +347,45 @@ export class MorningShaft implements Atmosphere {
     };
   }
 
-  /** Live-edit shaft endpoints, e.g. from a future gizmo. */
+  /** How many shafts are currently configured. */
+  getShaftCount(): number {
+    return this.shafts.length;
+  }
+
+  /** A specific handle so the dev panel can hand it to TransformControls. */
+  getShaftHandle(index: number, role: 'origin' | 'aim'): Mesh | undefined {
+    return this.handles[index * 2 + (role === 'origin' ? 0 : 1)];
+  }
+
+  /** Toggle visibility of every shaft handle. */
+  setHandlesVisible(visible: boolean): void {
+    for (const h of this.handles) h.visible = visible;
+  }
+
+  /** Snapshot the current shaft config — paste into morningShaft.ts defaults. */
+  logShaftConfig(): void {
+    const r3 = (n: number) => Math.round(n * 1000) / 1000;
+    const out = this.shafts.map((s) => ({
+      origin: [r3(s.origin.x), r3(s.origin.y), r3(s.origin.z)],
+      aim: [r3(s.aim.x), r3(s.aim.y), r3(s.aim.z)],
+      radius: r3(s.radius),
+    }));
+    console.log('[shafts]\n' + JSON.stringify(out, null, 2));
+  }
+
+  /** Tune a single shaft's radius without touching its endpoints. */
+  setShaftRadius(index: number, radius: number): void {
+    const s = this.shafts[index];
+    if (!s) return;
+    this.setShaft(index, s.origin, s.aim, radius);
+  }
+
+  /** Current radius of one shaft (so the panel slider can read it). */
+  getShaftRadius(index: number): number {
+    return this.shafts[index]?.radius ?? 0;
+  }
+
+  /** Live-edit shaft endpoints, e.g. from the panel's gizmo handle. */
   setShaft(index: number, origin: Vector3, aim: Vector3, radius: number): void {
     if (index < 0 || index >= this.cones.length) return;
     this.shafts[index] = { origin: origin.clone(), aim: aim.clone(), radius };

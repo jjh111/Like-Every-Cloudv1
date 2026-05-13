@@ -408,6 +408,49 @@ export async function start(container: HTMLElement): Promise<void> {
     }
   };
 
+  // Shaft handle editing — re-uses the same TransformControls. Picks one of
+  // the colored spheres MorningShaft drops at each shaft endpoint and lets
+  // the user drag it; the cone follows automatically via MorningShaft.update.
+  const morningShaft = atmospheres['morning-shaft'] as MorningShaft;
+  const shaftHandleIds: string[] = ['(none)'];
+  for (let i = 0; i < morningShaft.getShaftCount(); i++) {
+    shaftHandleIds.push(`shaft ${i} origin`, `shaft ${i} aim`);
+  }
+
+  const setShaftEditTarget = (id: string) => {
+    if (id === '(none)') {
+      morningShaft.setHandlesVisible(false);
+      transformControls.detach();
+      transformHelper.visible = false;
+      transformControls.enabled = false;
+      return;
+    }
+    const m = id.match(/^shaft (\d+) (origin|aim)$/);
+    if (!m) return;
+    const index = parseInt(m[1], 10);
+    const role = m[2] as 'origin' | 'aim';
+    const handle = morningShaft.getShaftHandle(index, role);
+    if (!handle) return;
+    morningShaft.setHandlesVisible(true);
+    transformControls.attach(handle);
+    transformHelper.visible = true;
+    transformControls.enabled = true;
+    // Endpoints are points — only translate makes sense.
+    setTransformMode('translate');
+    // Land in freeform so the user can orbit around the handle.
+    if (activeCamera !== cameras['freeform']) {
+      const handlePos = handle.position.clone();
+      const distance = Math.max(0.5, camera.position.distanceTo(handlePos));
+      const forward = new Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      const orbitTarget = camera.position.clone().add(forward.multiplyScalar(distance));
+      activeCamera.dispose();
+      activeCamera = cameras['freeform'];
+      (activeCamera as FreeformMode).init({ target: orbitTarget });
+    }
+  };
+
+  const logShaftConfig = () => morningShaft.logShaftConfig();
+
   const logHeroPositions = () => {
     // manifest.json takes radians for rotation, so the JSON is paste-ready.
     // The degrees readout that follows is purely for eyeballing.
@@ -466,6 +509,9 @@ export async function start(container: HTMLElement): Promise<void> {
     getTransformMode,
     logHeroPositions,
     saveHeroPositions,
+    shaftHandleIds,
+    setShaftEditTarget,
+    logShaftConfig,
   });
 
   // Bottom-left audio controls: mute toggle + master volume. Volume slider

@@ -31,6 +31,10 @@ export interface DebugDeps {
   logHeroPositions: () => void;
   /** Persist edited positions back to public/heroes/manifest.json via dev middleware. */
   saveHeroPositions: () => void;
+  /** Shaft-handle editing. Dropdown options + setter + console-log button. */
+  shaftHandleIds: string[];
+  setShaftEditTarget: (id: string) => void;
+  logShaftConfig: () => void;
 }
 
 type Controller = ReturnType<GUI['add']>;
@@ -38,17 +42,18 @@ type Controller = ReturnType<GUI['add']>;
 export function createDebugPanel(deps: DebugDeps): GUI {
   const gui = new GUI({ title: 'LEC dev panel' });
 
-  // View toggle sits at the top — it's the primary navigation control. The
-  // label updates from the polling tick below to reflect the current view.
+  // Top-level: view toggle is the primary nav action, kept loose at the
+  // top rather than buried in a folder. Label flips with deps.getView().
   const viewProxy = { go: () => deps.toggleView() };
   const viewBtn = gui.add(viewProxy, 'go').name('go inside →');
 
-  const proxy = {
+  // ── state ──────────────────────────────────────────────────────────────
+  const stateFolder = gui.addFolder('state');
+  const stateProxy = {
     target: deps.state.target,
     progress: deps.state.progress,
     duration: deps.state.duration,
     transition: deps.initialTransition,
-    camera: deps.initialCamera,
     snapPast: () => {
       deps.state.duration = 0;
       deps.state.setTarget('past');
@@ -60,30 +65,132 @@ export function createDebugPanel(deps: DebugDeps): GUI {
     animateOther: (() => {
       let next: 'past' | 'present' = 'present';
       return () => {
-        deps.state.duration = proxy.duration > 0 ? proxy.duration : 1;
+        deps.state.duration = stateProxy.duration > 0 ? stateProxy.duration : 1;
         deps.state.setTarget(next);
         next = next === 'present' ? 'past' : 'present';
       };
     })(),
   };
-
-  gui.add(proxy, 'target', ['past', 'present'])
+  stateFolder.add(stateProxy, 'target', ['past', 'present'])
     .onChange((v: 'past' | 'present') => deps.state.setTarget(v))
     .listen();
-  gui.add(proxy, 'progress', 0, 1, 0.001)
+  stateFolder.add(stateProxy, 'progress', 0, 1, 0.001)
     .onChange((v: number) => deps.state.setProgress(v))
     .listen();
-  gui.add(proxy, 'duration', 0, 5, 0.1)
+  stateFolder.add(stateProxy, 'duration', 0, 5, 0.1)
     .onChange((v: number) => { deps.state.duration = v; });
-  gui.add(proxy, 'snapPast').name('snap → past');
-  gui.add(proxy, 'snapPresent').name('snap → present');
-  gui.add(proxy, 'animateOther').name('animate to other');
-
-  gui.add(proxy, 'transition', Object.keys(deps.transitions))
+  stateFolder.add(stateProxy, 'snapPast').name('snap → past');
+  stateFolder.add(stateProxy, 'snapPresent').name('snap → present');
+  stateFolder.add(stateProxy, 'animateOther').name('animate to other');
+  stateFolder.add(stateProxy, 'transition', Object.keys(deps.transitions))
     .onChange((v: string) => deps.setTransition(v));
+  stateFolder.close();
 
-  // Audio cluster — sits between state/transition and camera, so each section
-  // is contiguous rather than camera being split by audio sliders.
+  // ── camera ─────────────────────────────────────────────────────────────
+  const cameraFolder = gui.addFolder('camera');
+  const cameraProxy = { camera: deps.initialCamera };
+  cameraFolder.add(cameraProxy, 'camera', Object.keys(deps.cameras))
+    .name('camera mode')
+    .onChange((v: string) => {
+      deps.setCamera(v);
+      refreshCameraTunables();
+    })
+    .listen();
+  // Per-camera tunables get added below cameraProxy via refreshCameraTunables.
+  let cameraTunableControllers: Controller[] = [];
+  function refreshCameraTunables() {
+    for (const c of cameraTunableControllers) c.destroy();
+    cameraTunableControllers = [];
+    const { target, specs } = deps.getActiveCamera().getTunables();
+    for (const s of specs) {
+      const c = cameraFolder
+        .add(target as Record<string, number>, s.key, s.min, s.max, s.step)
+        .name(s.label)
+        .listen();
+      cameraTunableControllers.push(c);
+    }
+  }
+  refreshCameraTunables();
+  cameraFolder.close();
+
+  // ── edit ───────────────────────────────────────────────────────────────
+  const editFolder = gui.addFolder('edit');
+  const editProxy = {
+    target: '(none)',
+    mode: 'translate' as 'translate' | 'rotate' | 'scale',
+    log: () => deps.logHeroPositions(),
+    save: () => deps.saveHeroPositions(),
+  };
+  const editTargetCtrl = editFolder.add(editProxy, 'target', deps.heroIds)
+    .name('edit hero')
+    .onChange((v: string) => {
+      // Picking a hero clears any shaft-handle selection — only one gizmo
+      // target at a time, otherwise the panel becomes a liar.
+      if (v !== '(none)' && atmosProxy.shaftHandle !== '(none)') {
+        atmosProxy.shaftHandle = '(none)';
+        shaftHandleCtrl.updateDisplay();
+        deps.setShaftEditTarget('(none)');
+      }
+      deps.setEditTarget(v);
+    });
+  editFolder.add(editProxy, 'mode', ['translate', 'rotate', 'scale'])
+    .name('mode (W/E/R)')
+    .onChange((v: 'translate' | 'rotate' | 'scale') => deps.setTransformMode(v))
+    .listen();
+  editFolder.add(editProxy, 'log').name('log positions');
+  editFolder.add(editProxy, 'save').name('save → manifest.json');
+
+  // ── atmosphere ─────────────────────────────────────────────────────────
+  const atmosFolder = gui.addFolder('atmosphere');
+  const atmosProxy = {
+    atmosphere: deps.initialAtmosphere,
+    shaftHandle: '(none)',
+    logShafts: () => deps.logShaftConfig(),
+  };
+  atmosFolder.add(atmosProxy, 'atmosphere', Object.keys(deps.atmospheres))
+    .name('preset')
+    .onChange((v: string) => {
+      // Reset shaft edit when atmosphere changes — new atmosphere may not
+      // have shaft handles at all.
+      atmosProxy.shaftHandle = '(none)';
+      shaftHandleCtrl.updateDisplay();
+      deps.setShaftEditTarget('(none)');
+      deps.setAtmosphere(v);
+      refreshAtmosphereTunables();
+    });
+  let atmosphereTunableControllers: Controller[] = [];
+  function refreshAtmosphereTunables() {
+    for (const c of atmosphereTunableControllers) c.destroy();
+    atmosphereTunableControllers = [];
+    const t = deps.getActiveAtmosphere().getTunables?.();
+    if (!t) return;
+    for (const s of t.specs) {
+      const c = atmosFolder
+        .add(t.target as Record<string, number>, s.key, s.min, s.max, s.step)
+        .name(s.label)
+        .listen();
+      atmosphereTunableControllers.push(c);
+    }
+  }
+  refreshAtmosphereTunables();
+  // Shaft endpoint editing — pick a handle, the existing TransformControls
+  // gizmo attaches to it. The yellow sphere is the door/window origin; the
+  // blue sphere is where the shaft splashes on the floor.
+  const shaftHandleCtrl = atmosFolder.add(atmosProxy, 'shaftHandle', deps.shaftHandleIds)
+    .name('edit shaft')
+    .onChange((v: string) => {
+      // Symmetric: picking a shaft handle clears the hero gizmo.
+      if (v !== '(none)' && editProxy.target !== '(none)') {
+        editProxy.target = '(none)';
+        editTargetCtrl.updateDisplay();
+        deps.setEditTarget('(none)');
+      }
+      deps.setShaftEditTarget(v);
+    });
+  atmosFolder.add(atmosProxy, 'logShafts').name('log shaft config');
+
+  // ── audio ──────────────────────────────────────────────────────────────
+  const audioFolder = gui.addFolder('audio');
   const audioProxy = {
     muted: deps.audio.muted,
     master: deps.audio.getMasterVolume(),
@@ -91,104 +198,36 @@ export function createDebugPanel(deps: DebugDeps): GUI {
     music: deps.audio.getChannelVolume('music'),
     narration: deps.audio.getChannelVolume('narration'),
     sfx: deps.audio.getChannelVolume('sfx'),
-    resume: () => { void deps.audio.resume(); },
   };
-  gui.add(audioProxy, 'muted')
+  audioFolder.add(audioProxy, 'muted')
     .name('muted')
     .onChange((v: boolean) => deps.audio.setMuted(v))
     .listen();
-  gui.add(audioProxy, 'master', 0, 1, 0.01)
+  audioFolder.add(audioProxy, 'master', 0, 1, 0.01)
     .name('master vol')
     .onChange((v: number) => deps.audio.setMasterVolume(v));
-  gui.add(audioProxy, 'ambient', 0, 1, 0.01)
+  audioFolder.add(audioProxy, 'ambient', 0, 1, 0.01)
     .name('ambient vol')
     .onChange((v: number) => deps.audio.setChannelVolume('ambient', v));
-  gui.add(audioProxy, 'music', 0, 1, 0.01)
+  audioFolder.add(audioProxy, 'music', 0, 1, 0.01)
     .name('music vol')
     .onChange((v: number) => deps.audio.setChannelVolume('music', v));
-  gui.add(audioProxy, 'narration', 0, 1, 0.01)
+  audioFolder.add(audioProxy, 'narration', 0, 1, 0.01)
     .name('narration vol')
     .onChange((v: number) => deps.audio.setChannelVolume('narration', v));
-  gui.add(audioProxy, 'sfx', 0, 1, 0.01)
+  audioFolder.add(audioProxy, 'sfx', 0, 1, 0.01)
     .name('sfx vol')
     .onChange((v: number) => deps.audio.setChannelVolume('sfx', v));
-  gui.add(audioProxy, 'resume').name('resume audio');
+  audioFolder.close();
 
-  gui.add(proxy, 'camera', Object.keys(deps.cameras))
-    .name('camera mode')
-    .onChange((v: string) => {
-      deps.setCamera(v);
-      refreshTunables();
-    })
-    .listen();
-
-  // Edit-mode block: pick a hero, get a TransformControls gizmo on it.
-  // Auto-switches to freeform camera when a target is picked. The 'log
-  // positions' button prints current transforms to console — paste into
-  // public/heroes/manifest.json to persist the new placement.
-  const editProxy = {
-    target: '(none)',
-    mode: 'translate' as 'translate' | 'rotate' | 'scale',
-    log: () => deps.logHeroPositions(),
-    save: () => deps.saveHeroPositions(),
-  };
-  gui.add(editProxy, 'target', deps.heroIds)
-    .name('edit hero')
-    .onChange((v: string) => deps.setEditTarget(v));
-  gui.add(editProxy, 'mode', ['translate', 'rotate', 'scale'])
-    .name('mode (W/E/R)')
-    .onChange((v: 'translate' | 'rotate' | 'scale') => deps.setTransformMode(v))
-    .listen();
-  gui.add(editProxy, 'log').name('log positions');
-  gui.add(editProxy, 'save').name('save → manifest.json');
-
-  // Atmosphere picker + its own tunables (refreshed whenever it changes).
-  const atmosProxy = { atmosphere: deps.initialAtmosphere };
-  gui.add(atmosProxy, 'atmosphere', Object.keys(deps.atmospheres))
-    .name('atmosphere')
-    .onChange((v: string) => {
-      deps.setAtmosphere(v);
-      refreshAtmosphereTunables();
-    });
-
-  let tunableControllers: Controller[] = [];
-  let atmosphereTunableControllers: Controller[] = [];
-
-  function refreshTunables() {
-    for (const c of tunableControllers) c.destroy();
-    tunableControllers = [];
-    const { target, specs } = deps.getActiveCamera().getTunables();
-    for (const s of specs) {
-      const c = gui
-        .add(target as Record<string, number>, s.key, s.min, s.max, s.step)
-        .name(s.label)
-        .listen();
-      tunableControllers.push(c);
-    }
-  }
-  function refreshAtmosphereTunables() {
-    for (const c of atmosphereTunableControllers) c.destroy();
-    atmosphereTunableControllers = [];
-    const t = deps.getActiveAtmosphere().getTunables?.();
-    if (!t) return;
-    for (const s of t.specs) {
-      const c = gui
-        .add(t.target as Record<string, number>, s.key, s.min, s.max, s.step)
-        .name(s.label)
-        .listen();
-      atmosphereTunableControllers.push(c);
-    }
-  }
-  refreshTunables();
-  refreshAtmosphereTunables();
-
-  // Detect external camera changes (e.g. the view toggle button) so the
-  // panel's dropdown + tunables follow along.
+  // Detect external changes (view toggle, programmatic camera swap, W/E/R
+  // shortcuts, mute via the bottom-left pill) so the panel mirrors state
+  // instead of being stale.
   let lastActiveCam = deps.getActiveCamera();
   setInterval(() => {
-    proxy.target = deps.state.target;
-    proxy.progress = deps.state.progress;
-    proxy.duration = deps.state.duration;
+    stateProxy.target = deps.state.target;
+    stateProxy.progress = deps.state.progress;
+    stateProxy.duration = deps.state.duration;
     audioProxy.muted = deps.audio.muted;
     editProxy.mode = deps.getTransformMode();
     viewBtn.name(deps.getView() === 'exterior' ? 'go inside →' : '← go outside');
@@ -198,11 +237,11 @@ export function createDebugPanel(deps: DebugDeps): GUI {
       lastActiveCam = activeCam;
       for (const [k, v] of Object.entries(deps.cameras)) {
         if (v === activeCam) {
-          proxy.camera = k;
+          cameraProxy.camera = k;
           break;
         }
       }
-      refreshTunables();
+      refreshCameraTunables();
     }
   }, 100);
 
