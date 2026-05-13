@@ -24,6 +24,8 @@ export interface DebugDeps {
   /** So the panel can mirror W/E/R keyboard shortcuts. */
   getTransformMode: () => 'translate' | 'rotate' | 'scale';
   logHeroPositions: () => void;
+  /** Persist edited positions back to public/heroes/manifest.json via dev middleware. */
+  saveHeroPositions: () => void;
 }
 
 type Controller = ReturnType<GUI['add']>;
@@ -123,6 +125,7 @@ export function createDebugPanel(deps: DebugDeps): GUI {
     target: '(none)',
     mode: 'translate' as 'translate' | 'rotate' | 'scale',
     log: () => deps.logHeroPositions(),
+    save: () => deps.saveHeroPositions(),
   };
   gui.add(editProxy, 'target', deps.heroIds)
     .name('edit hero')
@@ -132,6 +135,7 @@ export function createDebugPanel(deps: DebugDeps): GUI {
     .onChange((v: 'translate' | 'rotate' | 'scale') => deps.setTransformMode(v))
     .listen();
   gui.add(editProxy, 'log').name('log positions');
+  gui.add(editProxy, 'save').name('save → manifest.json');
 
   let tunableControllers: Controller[] = [];
 

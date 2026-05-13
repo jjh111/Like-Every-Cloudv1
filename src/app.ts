@@ -10,7 +10,7 @@ import { InstantSwap } from './transitions/instantSwap';
 import { OpacityCrossfade } from './transitions/opacityCrossfade';
 import type { Transition } from './transitions/transition';
 import { GLBLoader } from './loaders/glbLoader';
-import { HeroLoader } from './loaders/heroLoader';
+import { HeroLoader, type HeroEntry, type HeroPlacement } from './loaders/heroLoader';
 import { PointerInteraction } from './interaction/pointer';
 import { InteractionEngine } from './interaction/engine';
 import { RULES } from './interaction/rules';
@@ -236,19 +236,123 @@ export async function start(container: HTMLElement): Promise<void> {
     else if (e.key === 'r' || e.key === 'R') setTransformMode('scale');
   });
 
+  // Round to 3dp — matches what the rest of the manifest already uses.
+  const r3 = (n: number) => Math.round(n * 1000) / 1000;
+
+  // Custom formatter for manifest.json: keeps short placements + arrays of
+  // primitives on one line, matching the hand-curated style. JSON.stringify
+  // with indent=2 explodes them into multi-line blocks and bloats the file.
+  const formatScalar = (v: unknown): string => JSON.stringify(v);
+  const formatNumArray = (arr: number[]): string => `[${arr.join(', ')}]`;
+  const formatPlacement = (p: HeroPlacement): string => {
+    const parts: string[] = [`"state": ${formatScalar(p.state)}`];
+    if (p.position) parts.push(`"position": ${formatNumArray(p.position)}`);
+    if (p.rotation) parts.push(`"rotation": ${formatNumArray(p.rotation)}`);
+    if (p.scale !== undefined) {
+      parts.push(`"scale": ${Array.isArray(p.scale) ? formatNumArray(p.scale) : p.scale}`);
+    }
+    if (p.material_variant !== undefined) parts.push(`"material_variant": ${formatScalar(p.material_variant)}`);
+    if (p.visible !== undefined) parts.push(`"visible": ${p.visible}`);
+    let hasUserData = false;
+    if (p.userData) {
+      hasUserData = true;
+      const ud = Object.entries(p.userData)
+        .map(([k, v]) => `${formatScalar(k)}: ${formatScalar(v)}`)
+        .join(', ');
+      parts.push(`"userData": { ${ud} }`);
+    }
+    const oneLine = `{ ${parts.join(', ')} }`;
+    // Placements with userData are conceptually richer — keep them expanded
+    // for readability even if they'd fit on one line.
+    if (!hasUserData && oneLine.length <= 110) return oneLine;
+    return '{\n          ' + parts.join(',\n          ') + '\n        }';
+  };
+  const formatHero = (entry: HeroEntry): string => {
+    const lines: string[] = [];
+    lines.push(`      "id": ${formatScalar(entry.id)},`);
+    lines.push(`      "url": ${formatScalar(entry.url)},`);
+    if (entry.interactive !== undefined) {
+      lines.push(`      "interactive": ${entry.interactive},`);
+    }
+    const placements = (entry.placements ?? []).map((p) => '        ' + formatPlacement(p)).join(',\n');
+    lines.push('      "placements": [\n' + placements + '\n      ]');
+    return '    {\n' + lines.join('\n') + '\n    }';
+  };
+  const formatManifest = (manifest: { heroes: HeroEntry[] }): string => {
+    const heroes = (manifest.heroes ?? []).map(formatHero).join(',\n');
+    return '{\n  "heroes": [\n' + heroes + '\n  ]\n}\n';
+  };
+
+  const saveHeroPositions = async () => {
+    // Strategy: load the manifest fresh, replace position/rotation/scale on
+    // any hero we can unambiguously match by id, POST the result back to
+    // the dev middleware. Heroes with multiple placements (e.g. cassettes)
+    // are skipped — heroLookup only stores the last instance per id, so we
+    // can't tell which placement was just edited. Future work: index every
+    // placement separately.
+    try {
+      const res = await fetch('/heroes/manifest.json', { cache: 'no-store' });
+      if (!res.ok) throw new Error('manifest fetch: ' + res.status);
+      const manifest = (await res.json()) as { heroes: HeroEntry[] };
+
+      const updated: string[] = [];
+      const skipped: string[] = [];
+
+      for (const entry of manifest.heroes ?? []) {
+        const placements = entry.placements ?? [];
+        if (placements.length !== 1) {
+          if (placements.length > 1) skipped.push(`${entry.id} (${placements.length} placements)`);
+          continue;
+        }
+        const obj = heroLookup.get(entry.id);
+        if (!obj) {
+          skipped.push(`${entry.id} (not in scene)`);
+          continue;
+        }
+        const placement: HeroPlacement = placements[0];
+        placement.position = [r3(obj.position.x), r3(obj.position.y), r3(obj.position.z)];
+
+        const ax = r3(obj.rotation.x), ay = r3(obj.rotation.y), az = r3(obj.rotation.z);
+        if (ax === 0 && ay === 0 && az === 0) delete placement.rotation;
+        else placement.rotation = [ax, ay, az];
+
+        const sx = r3(obj.scale.x), sy = r3(obj.scale.y), sz = r3(obj.scale.z);
+        if (sx === 1 && sy === 1 && sz === 1) delete placement.scale;
+        else if (sx === sy && sy === sz) placement.scale = sx;
+        else placement.scale = [sx, sy, sz];
+
+        updated.push(entry.id);
+      }
+
+      const saveRes = await fetch('/__lec/save-manifest', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: formatManifest(manifest),
+      });
+      if (!saveRes.ok) {
+        const msg = await saveRes.text();
+        throw new Error(`save responded ${saveRes.status}: ${msg}`);
+      }
+      const result = (await saveRes.json()) as { saved?: string };
+      console.log('[manifest] saved →', result.saved);
+      console.log('[manifest] updated:', updated);
+      if (skipped.length) console.log('[manifest] skipped:', skipped);
+    } catch (e) {
+      console.warn('[manifest] save failed', e);
+    }
+  };
+
   const logHeroPositions = () => {
     // manifest.json takes radians for rotation, so the JSON is paste-ready.
-    // We also print a degrees readout afterwards because radians are awful
-    // to eyeball.
+    // The degrees readout that follows is purely for eyeballing.
     const out: Record<string, { position: number[]; rotation: number[]; scale: number[] }> = {};
     const deg: Record<string, number[]> = {};
-    const r = (n: number) => Math.round(n * 1000) / 1000;
     const RAD2DEG = 180 / Math.PI;
     for (const [id, obj] of heroLookup) {
       out[id] = {
-        position: [r(obj.position.x), r(obj.position.y), r(obj.position.z)],
-        rotation: [r(obj.rotation.x), r(obj.rotation.y), r(obj.rotation.z)],
-        scale:    [r(obj.scale.x),    r(obj.scale.y),    r(obj.scale.z)],
+        position: [r3(obj.position.x), r3(obj.position.y), r3(obj.position.z)],
+        rotation: [r3(obj.rotation.x), r3(obj.rotation.y), r3(obj.rotation.z)],
+        scale:    [r3(obj.scale.x),    r3(obj.scale.y),    r3(obj.scale.z)],
       };
       deg[id] = [
         Math.round(obj.rotation.x * RAD2DEG * 10) / 10,
@@ -291,6 +395,7 @@ export async function start(container: HTMLElement): Promise<void> {
     setTransformMode,
     getTransformMode,
     logHeroPositions,
+    saveHeroPositions,
   });
 
   // Bottom-left audio controls: mute toggle + master volume. Volume slider
