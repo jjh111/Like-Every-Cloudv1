@@ -21,6 +21,8 @@ export interface DebugDeps {
   heroIds: string[];
   setEditTarget: (heroId: string) => void;
   setTransformMode: (mode: 'translate' | 'rotate' | 'scale') => void;
+  /** So the panel can mirror W/E/R keyboard shortcuts. */
+  getTransformMode: () => 'translate' | 'rotate' | 'scale';
   logHeroPositions: () => void;
 }
 
@@ -126,8 +128,9 @@ export function createDebugPanel(deps: DebugDeps): GUI {
     .name('edit hero')
     .onChange((v: string) => deps.setEditTarget(v));
   gui.add(editProxy, 'mode', ['translate', 'rotate', 'scale'])
-    .name('transform mode')
-    .onChange((v: 'translate' | 'rotate' | 'scale') => deps.setTransformMode(v));
+    .name('mode (W/E/R)')
+    .onChange((v: 'translate' | 'rotate' | 'scale') => deps.setTransformMode(v))
+    .listen();
   gui.add(editProxy, 'log').name('log positions');
 
   let tunableControllers: Controller[] = [];
@@ -154,6 +157,7 @@ export function createDebugPanel(deps: DebugDeps): GUI {
     proxy.progress = deps.state.progress;
     proxy.duration = deps.state.duration;
     audioProxy.muted = deps.audio.muted;
+    editProxy.mode = deps.getTransformMode();
     viewBtn.name(deps.getView() === 'exterior' ? 'go inside →' : '← go outside');
 
     const activeCam = deps.getActiveCamera();

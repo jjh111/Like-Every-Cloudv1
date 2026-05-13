@@ -1,6 +1,16 @@
-import type { Camera, Vector3 } from 'three';
+import { Vector3, type Camera } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { CameraMode, TunableSpec } from './cameraMode';
+
+export interface FreeformInitOptions {
+  /**
+   * Override the orbit pivot for this init. If omitted the constructor's
+   * target is used. Useful when entering freeform from another mode and you
+   * want to preserve the current camera transform — pass a point on the
+   * camera's forward ray and OrbitControls.update() becomes a no-op.
+   */
+  target?: Vector3;
+}
 
 const TUNABLES: TunableSpec[] = [
   { key: 'damping', label: 'damping', min: 0, max: 0.3, step: 0.01 },
@@ -39,14 +49,25 @@ export class FreeformMode implements CameraMode {
     private target: Vector3,
   ) {}
 
-  init(): void {
+  init(options?: FreeformInitOptions): void {
     this.controls = new OrbitControls(this.camera, this.domElement);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = this._damping;
     this.controls.rotateSpeed = this._rotateSpeed;
     this.controls.zoomSpeed = this._zoomSpeed;
-    this.controls.target.copy(this.target);
+    this.controls.target.copy(options?.target ?? this.target);
     this.controls.update();
+  }
+
+  /**
+   * Point the orbit pivot somewhere else without re-creating OrbitControls.
+   * The constructor's default target is left alone — next dispose/init
+   * cycle without an explicit `target` reverts to it.
+   */
+  setOrbitTarget(target: Vector3): void {
+    if (this.controls) {
+      this.controls.target.copy(target);
+    }
   }
 
   update(): void {

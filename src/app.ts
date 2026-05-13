@@ -3,6 +3,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { createCamera, createRenderer, createScene } from './scene/sceneGraph';
 import type { CameraMode } from './camera/cameraMode';
 import { FreeformMode } from './camera/freeformMode';
+import type { FreeformInitOptions } from './camera/freeformMode';
 import { RailsMode } from './camera/railsMode';
 import { StateController } from './state/stateController';
 import { InstantSwap } from './transitions/instantSwap';
@@ -13,8 +14,8 @@ import { HeroLoader } from './loaders/heroLoader';
 import { PointerInteraction } from './interaction/pointer';
 import { InteractionEngine } from './interaction/engine';
 import { RULES } from './interaction/rules';
-import { AudioManager } from './audio/audioManager';
-import { AUDIO_ASSETS } from './audio/manifest';
+import { AudioManager, type AudioChannel } from './audio/audioManager';
+import { AUDIO_ASSETS, type AudioAsset } from './audio/manifest';
 import { getHeroId } from './scene/tagging';
 import { createDebugPanel } from './debug/debugPanel';
 
@@ -197,27 +198,66 @@ export async function start(container: HTMLElement): Promise<void> {
     transformControls.attach(obj);
     transformHelper.visible = true;
     transformControls.enabled = true;
-    // Auto-switch to freeform so the user can orbit around the gizmo.
+    // Auto-switch to freeform so the user can orbit around the gizmo —
+    // but keep the camera exactly where it is. We park the orbit pivot
+    // on the camera's current forward ray (at the hero's depth) so
+    // OrbitControls' first update() is a no-op (camera is already looking
+    // at the new target). Mouse-orbit will then rotate around that pivot,
+    // which lands right around the hero in the view.
     if (activeCamera !== cameras['freeform']) {
-      setCamera('freeform');
+      const heroPos = new Vector3();
+      obj.getWorldPosition(heroPos);
+      const distance = Math.max(0.5, camera.position.distanceTo(heroPos));
+      const forward = new Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      const orbitTarget = camera.position.clone().add(forward.multiplyScalar(distance));
+      const options: FreeformInitOptions = { target: orbitTarget };
+      activeCamera.dispose();
+      activeCamera = cameras['freeform'];
+      (activeCamera as FreeformMode).init(options);
     }
   };
 
+  let currentTransformMode: 'translate' | 'rotate' | 'scale' = 'translate';
   const setTransformMode = (mode: 'translate' | 'rotate' | 'scale') => {
+    currentTransformMode = mode;
     transformControls.setMode(mode);
   };
+  const getTransformMode = () => currentTransformMode;
+
+  // Blender/Maya-ish shortcuts so I can flip the gizmo while dragging the
+  // camera around: W=translate, E=rotate, R=scale. Only fire when something
+  // is actually attached and the user isn't typing in a dev-panel input.
+  window.addEventListener('keydown', (e) => {
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (!transformControls.object) return;
+    if (e.key === 'w' || e.key === 'W') setTransformMode('translate');
+    else if (e.key === 'e' || e.key === 'E') setTransformMode('rotate');
+    else if (e.key === 'r' || e.key === 'R') setTransformMode('scale');
+  });
 
   const logHeroPositions = () => {
+    // manifest.json takes radians for rotation, so the JSON is paste-ready.
+    // We also print a degrees readout afterwards because radians are awful
+    // to eyeball.
     const out: Record<string, { position: number[]; rotation: number[]; scale: number[] }> = {};
+    const deg: Record<string, number[]> = {};
     const r = (n: number) => Math.round(n * 1000) / 1000;
+    const RAD2DEG = 180 / Math.PI;
     for (const [id, obj] of heroLookup) {
       out[id] = {
         position: [r(obj.position.x), r(obj.position.y), r(obj.position.z)],
         rotation: [r(obj.rotation.x), r(obj.rotation.y), r(obj.rotation.z)],
         scale:    [r(obj.scale.x),    r(obj.scale.y),    r(obj.scale.z)],
       };
+      deg[id] = [
+        Math.round(obj.rotation.x * RAD2DEG * 10) / 10,
+        Math.round(obj.rotation.y * RAD2DEG * 10) / 10,
+        Math.round(obj.rotation.z * RAD2DEG * 10) / 10,
+      ];
     }
     console.log('[positions]\n' + JSON.stringify(out, null, 2));
+    console.log('[rotations (deg)]', deg);
   };
 
   // Audio + interaction engine.
@@ -249,12 +289,16 @@ export async function start(container: HTMLElement): Promise<void> {
     heroIds: ['(none)', ...Array.from(heroLookup.keys()).sort()],
     setEditTarget,
     setTransformMode,
+    getTransformMode,
     logHeroPositions,
   });
 
   // Bottom-left audio controls: mute toggle + master volume. Volume slider
   // is always editable; mute starts on and is the user's "begin" action.
   createAudioControls(audio);
+
+  // Bottom-center: every loaded track + what's currently playing per channel.
+  createTracksBar(audio, AUDIO_ASSETS);
 
   // Bottom-right info pill — heroes loaded + current state.
   createSceneInfo(heroLookup, stateController);
@@ -338,6 +382,88 @@ function createSceneInfo(heroLookup: Map<string, Object3D>, state: StateControll
   };
   render();
   setInterval(render, 500);
+}
+
+function createTracksBar(audio: AudioManager, assets: AudioAsset[]): void {
+  // Centered bottom strip: top row shows per-channel "now playing" labels,
+  // bottom row is the catalog of tracks lit up when active. The whole thing
+  // polls audio.listPlaying() — no events plumbed through — because the
+  // playing set churns rarely enough that 200ms is fine.
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = [
+    'position: fixed',
+    'bottom: 16px',
+    'left: 50%',
+    'transform: translateX(-50%)',
+    'display: flex',
+    'flex-direction: column',
+    'gap: 6px',
+    'align-items: center',
+    'padding: 8px 14px',
+    'background: rgba(15, 15, 15, 0.7)',
+    'color: #ddd',
+    'font: 12px/1.3 system-ui, sans-serif',
+    'border-radius: 12px',
+    'backdrop-filter: blur(6px)',
+    'z-index: 1000',
+    'user-select: none',
+    'max-width: min(640px, 60vw)',
+  ].join('; ');
+
+  const channels: AudioChannel[] = ['ambient', 'music', 'narration', 'sfx'];
+
+  const channelRow = document.createElement('div');
+  channelRow.style.cssText = 'display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;';
+  const channelLabels: Record<AudioChannel, HTMLDivElement> = {} as Record<AudioChannel, HTMLDivElement>;
+  for (const ch of channels) {
+    const div = document.createElement('div');
+    div.style.cssText = 'padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,0.06); white-space: nowrap;';
+    channelLabels[ch] = div;
+    channelRow.appendChild(div);
+  }
+
+  const trackRow = document.createElement('div');
+  trackRow.style.cssText = 'display: flex; gap: 6px; flex-wrap: wrap; justify-content: center;';
+  const trackChips = new Map<string, HTMLDivElement>();
+  for (const a of assets) {
+    const chip = document.createElement('div');
+    chip.style.cssText = 'padding: 2px 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.15); transition: background 120ms, color 120ms, border-color 120ms;';
+    chip.textContent = a.id;
+    trackChips.set(a.id, chip);
+    trackRow.appendChild(chip);
+  }
+
+  wrapper.appendChild(channelRow);
+  wrapper.appendChild(trackRow);
+  document.body.appendChild(wrapper);
+
+  const ACTIVE = '#9fd66b';
+  const IDLE = '#8a8a8a';
+
+  const render = () => {
+    const playing = audio.listPlaying();
+    const byChannel: Partial<Record<AudioChannel, string>> = {};
+    const playingIds = new Set<string>();
+    for (const p of playing) {
+      // If somehow two sources hit the same channel, keep the first seen —
+      // ambient/music are designed to be one-at-a-time per channel.
+      if (!byChannel[p.channel]) byChannel[p.channel] = p.id;
+      playingIds.add(p.id);
+    }
+    for (const ch of channels) {
+      const id = byChannel[ch];
+      channelLabels[ch].textContent = id ? `${ch}: ${id}` : `${ch}: —`;
+      channelLabels[ch].style.color = id ? ACTIVE : IDLE;
+    }
+    for (const [id, chip] of trackChips) {
+      const on = playingIds.has(id);
+      chip.style.background = on ? 'rgba(159, 214, 107, 0.18)' : 'transparent';
+      chip.style.borderColor = on ? 'rgba(159, 214, 107, 0.55)' : 'rgba(255,255,255,0.15)';
+      chip.style.color = on ? '#cfe9b3' : IDLE;
+    }
+  };
+  render();
+  setInterval(render, 200);
 }
 
 function createAudioControls(audio: AudioManager): void {

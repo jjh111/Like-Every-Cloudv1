@@ -305,6 +305,15 @@ export class AudioManager {
     return false;
   }
 
+  /** Snapshot of every active source as {id, channel}. Order is not stable. */
+  listPlaying(): { id: string; channel: AudioChannel }[] {
+    const out: { id: string; channel: AudioChannel }[] = [];
+    for (const entry of this.playing.values()) {
+      out.push({ id: entry.id, channel: entry.channel });
+    }
+    return out;
+  }
+
   getChannelVolume(channel: AudioChannel): number {
     return this.channels[channel].gain.value;
   }
