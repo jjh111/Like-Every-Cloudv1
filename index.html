@@ -5,8 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Like Every Cloud</title>
     <style>
-      html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #111; color: #ddd; font-family: system-ui, sans-serif; }
-      canvas { display: block; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+        color: #ddd;
+        font-family: system-ui, sans-serif;
+        /* Sky gradient — three.js renderer is alpha:true so this shows through. */
+        background: linear-gradient(
+          to bottom,
+          #a8c8e8 0%,
+          #dec699 65%,
+          #c9a878 100%
+        );
+      }
+      canvas { display: block; background: transparent; }
     </style>
   </head>
   <body>

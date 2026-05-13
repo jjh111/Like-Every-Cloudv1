@@ -14,12 +14,25 @@ export interface DebugDeps {
   setCamera: (name: string) => void;
   getActiveCamera: () => CameraMode;
   audio: AudioManager;
+  /** High-level outside/inside toggle. */
+  getView: () => 'exterior' | 'interior';
+  toggleView: () => void;
+  /** Edit-mode controls — pick a hero, get a translate/rotate/scale gizmo. */
+  heroIds: string[];
+  setEditTarget: (heroId: string) => void;
+  setTransformMode: (mode: 'translate' | 'rotate' | 'scale') => void;
+  logHeroPositions: () => void;
 }
 
 type Controller = ReturnType<GUI['add']>;
 
 export function createDebugPanel(deps: DebugDeps): GUI {
   const gui = new GUI({ title: 'LEC dev panel' });
+
+  // View toggle sits at the top — it's the primary navigation control. The
+  // label updates from the polling tick below to reflect the current view.
+  const viewProxy = { go: () => deps.toggleView() };
+  const viewBtn = gui.add(viewProxy, 'go').name('go inside →');
 
   const proxy = {
     target: deps.state.target,
@@ -97,7 +110,25 @@ export function createDebugPanel(deps: DebugDeps): GUI {
     .onChange((v: string) => {
       deps.setCamera(v);
       refreshTunables();
-    });
+    })
+    .listen();
+
+  // Edit-mode block: pick a hero, get a TransformControls gizmo on it.
+  // Auto-switches to freeform camera when a target is picked. The 'log
+  // positions' button prints current transforms to console — paste into
+  // public/heroes/manifest.json to persist the new placement.
+  const editProxy = {
+    target: '(none)',
+    mode: 'translate' as 'translate' | 'rotate' | 'scale',
+    log: () => deps.logHeroPositions(),
+  };
+  gui.add(editProxy, 'target', deps.heroIds)
+    .name('edit hero')
+    .onChange((v: string) => deps.setEditTarget(v));
+  gui.add(editProxy, 'mode', ['translate', 'rotate', 'scale'])
+    .name('transform mode')
+    .onChange((v: 'translate' | 'rotate' | 'scale') => deps.setTransformMode(v));
+  gui.add(editProxy, 'log').name('log positions');
 
   let tunableControllers: Controller[] = [];
 
@@ -115,11 +146,27 @@ export function createDebugPanel(deps: DebugDeps): GUI {
   }
   refreshTunables();
 
+  // Detect external camera changes (e.g. the view toggle button) so the
+  // panel's dropdown + tunables follow along.
+  let lastActiveCam = deps.getActiveCamera();
   setInterval(() => {
     proxy.target = deps.state.target;
     proxy.progress = deps.state.progress;
     proxy.duration = deps.state.duration;
     audioProxy.muted = deps.audio.muted;
+    viewBtn.name(deps.getView() === 'exterior' ? 'go inside →' : '← go outside');
+
+    const activeCam = deps.getActiveCamera();
+    if (activeCam !== lastActiveCam) {
+      lastActiveCam = activeCam;
+      for (const [k, v] of Object.entries(deps.cameras)) {
+        if (v === activeCam) {
+          proxy.camera = k;
+          break;
+        }
+      }
+      refreshTunables();
+    }
   }, 100);
 
   return gui;

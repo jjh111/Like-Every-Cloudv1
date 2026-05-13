@@ -1,3 +1,71 @@
 {
-  "heroes": []
+  "heroes": [
+    {
+      "id": "hero_speaker",
+      "url": "/heroes/hero_speaker.glb",
+      "interactive": true,
+      "placements": [
+        { "state": "past", "position": [-1.8, -0.3, 0.5] }
+      ]
+    },
+    {
+      "id": "hero_boombox",
+      "url": "/heroes/hero_boombox.glb",
+      "interactive": true,
+      "placements": [
+        { "state": "past", "position": [0.4, -0.3, -1.8] }
+      ]
+    },
+    {
+      "id": "hero_amp",
+      "url": "/heroes/hero_amp.glb",
+      "interactive": true,
+      "placements": [
+        { "state": "past", "position": [-1.5, 0.1, 0.4] }
+      ]
+    },
+    {
+      "id": "hero_table",
+      "url": "/heroes/hero_table.glb",
+      "interactive": false,
+      "placements": [
+        { "state": "both", "position": [-0.26, 0.25, -1.03] }
+      ]
+    },
+    {
+      "id": "hero_monoblock_chair",
+      "url": "/heroes/hero_monoblock_chair.glb",
+      "interactive": false,
+      "placements": [
+        { "state": "both", "position": [-1.0, -0.6, -0.7], "rotation": [0, 0.6, 0] }
+      ]
+    },
+    {
+      "id": "hero_cassette",
+      "url": "/heroes/hero_cassette.glb",
+      "interactive": true,
+      "placements": [
+        {
+          "state": "past",
+          "position": [-0.7, 0.45, -1.03],
+          "userData": { "track_id": "test_music_2", "audio_source_hero_id": "hero_boombox" }
+        },
+        {
+          "state": "past",
+          "position": [-0.4, 0.45, -1.03],
+          "userData": { "track_id": "test_music_3", "audio_source_hero_id": "hero_boombox" }
+        },
+        {
+          "state": "past",
+          "position": [-0.1, 0.45, -1.03],
+          "userData": { "track_id": "test_music_4", "audio_source_hero_id": "hero_boombox" }
+        },
+        {
+          "state": "past",
+          "position": [0.2, 0.45, -1.03],
+          "userData": { "track_id": "test_music_5", "audio_source_hero_id": "hero_boombox" }
+        }
+      ]
+    }
+  ]
 }

@@ -15,7 +15,12 @@ export class OpacityCrossfade implements Transition {
   init(scene: Scene): void {
     this.meshes = [];
     scene.traverse((obj) => {
-      if (!getStateTag(obj)) return;
+      const tag = getStateTag(obj);
+      // 'both'-tagged meshes are always fully opaque — don't mark them
+      // transparent. With transparent:true on always-opaque materials,
+      // three.js's alpha sort kicks in and back faces can bleed through
+      // (visible on the table's lace front panel).
+      if (!tag || tag === 'both') return;
       const mesh = obj as Mesh;
       if (!mesh.isMesh) return;
       mesh.material = Array.isArray(mesh.material)
@@ -30,10 +35,9 @@ export class OpacityCrossfade implements Transition {
     const transitioning = ctx.current !== ctx.target;
     for (const mesh of this.meshes) {
       const tag = getStateTag(mesh);
+      // 'both' is filtered out in init(); only past/present meshes reach here.
       let op = 0;
-      if (tag === 'both') {
-        op = 1;
-      } else if (transitioning) {
+      if (transitioning) {
         if (tag === ctx.target) op = ctx.progress;
         else if (tag === ctx.current) op = 1 - ctx.progress;
       } else if (tag === ctx.current) {

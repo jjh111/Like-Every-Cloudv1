@@ -9,3 +9,15 @@ dist/
 
 # User-marked working folders.
 Working - gitignore/
+
+# Source asset checkouts (Rhino/Blender working files, sample audio dumps).
+# Heavy + machine-local; the canonical scene lives in public/scene/shared.glb.
+assets/
+
+# Director / concept docs — drafts and reference PDFs from the brief.
+Concepts - Draft Text/
+LIKE EVERY CLOUD concept document.pdf
+
+# GLB exports — too large for git until optimized. Re-evaluate after KTX2.
+public/scene/*.glb
+public/heroes/*.glb

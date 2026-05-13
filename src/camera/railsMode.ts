@@ -54,7 +54,14 @@ export class RailsMode implements CameraMode {
   }
 
   update(): void {
-    const diff = this.targetT - this._t;
+    let diff = this.targetT - this._t;
+    // For a closed loop, wrap diff into the shorter direction so the camera
+    // doesn't lerp the long way across the seam (e.g. 0.95 -> 0.05 should
+    // travel +0.10, not -0.90).
+    if (this.closed) {
+      if (diff > 0.5) diff -= 1;
+      else if (diff < -0.5) diff += 1;
+    }
     if (Math.abs(diff) > 0.00005) {
       this._t = this.clampT(this._t + diff * this.smoothing);
       this.applyAt(this._t);
