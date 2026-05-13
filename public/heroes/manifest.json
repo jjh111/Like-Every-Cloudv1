@@ -13,7 +13,7 @@
       "url": "/heroes/hero_boombox.glb",
       "interactive": true,
       "placements": [
-        { "state": "past", "position": [0.777, 0.823, -0.898], "rotation": [3.142, -0.893, 3.142] }
+        { "state": "past", "position": [-0.844, 0.602, -1.118], "rotation": [-0.001, -1.058, 0] }
       ]
     },
     {
@@ -29,7 +29,7 @@
       "url": "/heroes/hero_table.glb",
       "interactive": false,
       "placements": [
-        { "state": "both", "position": [-0.26, 0.25, -1.03] }
+        { "state": "both", "position": [-0.333, 0.402, -1.03] }
       ]
     },
     {
