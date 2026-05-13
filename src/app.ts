@@ -18,6 +18,9 @@ import { AudioManager, type AudioChannel } from './audio/audioManager';
 import { AUDIO_ASSETS, type AudioAsset } from './audio/manifest';
 import { getHeroId } from './scene/tagging';
 import { createDebugPanel } from './debug/debugPanel';
+import type { Atmosphere } from './atmosphere/atmosphere';
+import { NoAtmosphere } from './atmosphere/atmosphere';
+import { MorningShaft } from './atmosphere/morningShaft';
 
 export async function start(container: HTMLElement): Promise<void> {
   const scene = createScene();
@@ -165,6 +168,26 @@ export async function start(container: HTMLElement): Promise<void> {
     active = next;
     active.init(scene);
   };
+
+  // Atmosphere — pluggable like transitions/cameras. Owns the scene's fog
+  // (swaps to FogExp2 + restores on dispose) plus any dust / shaft meshes.
+  const atmosphereCtx = { scene, camera };
+  const atmospheres: Record<string, Atmosphere> = {
+    'morning-shaft': new MorningShaft(),
+    'none': new NoAtmosphere(),
+  };
+  const initialAtmosphereName = 'morning-shaft';
+  let activeAtmosphere: Atmosphere = atmospheres[initialAtmosphereName];
+  activeAtmosphere.init(atmosphereCtx);
+
+  const setAtmosphere = (name: string) => {
+    const next = atmospheres[name];
+    if (!next || next === activeAtmosphere) return;
+    activeAtmosphere.dispose(atmosphereCtx);
+    activeAtmosphere = next;
+    activeAtmosphere.init(atmosphereCtx);
+  };
+  const getActiveAtmosphere = () => activeAtmosphere;
 
   const pointer = new PointerInteraction(renderer.domElement, camera, contentRoot);
   pointer.attach();
@@ -430,6 +453,10 @@ export async function start(container: HTMLElement): Promise<void> {
     setCamera,
     initialCamera: initialCameraName,
     getActiveCamera,
+    atmospheres,
+    setAtmosphere,
+    initialAtmosphere: initialAtmosphereName,
+    getActiveAtmosphere,
     audio,
     getView,
     toggleView: () => setView(getView() === 'exterior' ? 'interior' : 'exterior'),
@@ -478,6 +505,7 @@ export async function start(container: HTMLElement): Promise<void> {
     stateController.tick(dt);
     active.update(stateController.context);
     activeCamera.update(dt);
+    activeAtmosphere.update(atmosphereCtx, dt);
     audio.syncSpatial(camera);
 
     const musicActive = audio.isChannelActive('music');

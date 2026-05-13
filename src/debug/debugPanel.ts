@@ -3,6 +3,7 @@ import type { StateController } from '../state/stateController';
 import type { Transition } from '../transitions/transition';
 import type { CameraMode } from '../camera/cameraMode';
 import type { AudioManager } from '../audio/audioManager';
+import type { Atmosphere } from '../atmosphere/atmosphere';
 
 export interface DebugDeps {
   state: StateController;
@@ -13,6 +14,10 @@ export interface DebugDeps {
   initialCamera: string;
   setCamera: (name: string) => void;
   getActiveCamera: () => CameraMode;
+  atmospheres: Record<string, Atmosphere>;
+  initialAtmosphere: string;
+  setAtmosphere: (name: string) => void;
+  getActiveAtmosphere: () => Atmosphere;
   audio: AudioManager;
   /** High-level outside/inside toggle. */
   getView: () => 'exterior' | 'interior';
@@ -137,7 +142,17 @@ export function createDebugPanel(deps: DebugDeps): GUI {
   gui.add(editProxy, 'log').name('log positions');
   gui.add(editProxy, 'save').name('save → manifest.json');
 
+  // Atmosphere picker + its own tunables (refreshed whenever it changes).
+  const atmosProxy = { atmosphere: deps.initialAtmosphere };
+  gui.add(atmosProxy, 'atmosphere', Object.keys(deps.atmospheres))
+    .name('atmosphere')
+    .onChange((v: string) => {
+      deps.setAtmosphere(v);
+      refreshAtmosphereTunables();
+    });
+
   let tunableControllers: Controller[] = [];
+  let atmosphereTunableControllers: Controller[] = [];
 
   function refreshTunables() {
     for (const c of tunableControllers) c.destroy();
@@ -151,7 +166,21 @@ export function createDebugPanel(deps: DebugDeps): GUI {
       tunableControllers.push(c);
     }
   }
+  function refreshAtmosphereTunables() {
+    for (const c of atmosphereTunableControllers) c.destroy();
+    atmosphereTunableControllers = [];
+    const t = deps.getActiveAtmosphere().getTunables?.();
+    if (!t) return;
+    for (const s of t.specs) {
+      const c = gui
+        .add(t.target as Record<string, number>, s.key, s.min, s.max, s.step)
+        .name(s.label)
+        .listen();
+      atmosphereTunableControllers.push(c);
+    }
+  }
   refreshTunables();
+  refreshAtmosphereTunables();
 
   // Detect external camera changes (e.g. the view toggle button) so the
   // panel's dropdown + tunables follow along.
