@@ -1,4 +1,4 @@
-import type { Object3D } from 'three';
+import { Group, type Object3D } from 'three';
 import type { GLBLoader } from './glbLoader';
 import { HERO_ID_KEY, tagInteractive, tagState, type StateTag } from '../scene/tagging';
 
@@ -69,6 +69,19 @@ export class HeroLoader {
         }
       });
       const placements = entry.placements ?? [];
+      const multi = placements.length > 1;
+
+      // Multi-placement heroes get wrapped in a Group at identity so the dev
+      // panel can grab a single handle ("...#all") and translate/rotate the
+      // whole row together. The group itself is NOT tagged interactive, so
+      // in-game raycasts still resolve to individual children.
+      let group: Group | null = null;
+      if (multi) {
+        group = new Group();
+        group.userData[HERO_ID_KEY] = entry.id + '#all';
+        out.push(group);
+      }
+
       for (let i = 0; i < placements.length; i++) {
         const placement = placements[i];
         // Reuse the base node for the first placement, clone for additional ones.
@@ -83,10 +96,14 @@ export class HeroLoader {
         }
         if (placement.visible === false) obj.visible = false;
         tagState(obj, placement.state);
-        // Always tag the hero_id so heroLookup + edit-mode + scene info can
-        // find this object. The interactive flag only controls click-eligibility.
-        obj.userData[HERO_ID_KEY] = entry.id;
-        if (entry.interactive !== false) tagInteractive(obj, entry.id);
+        // Unique id per instance — singletons keep entry.id (back-compat),
+        // multi-placement uses entry.id#index so each is independently
+        // addressable in the edit dropdown and the save logic.
+        const instanceId = multi ? `${entry.id}#${i}` : entry.id;
+        obj.userData[HERO_ID_KEY] = instanceId;
+        // Rule engine uses startsWith(prefix), so "hero_cassette#0" still
+        // matches a heroIdPrefix of "hero_cassette".
+        if (entry.interactive !== false) tagInteractive(obj, instanceId);
         if (placement.material_variant) {
           // Stashed for later — variant switching needs the GLTFLoader's
           // KHR_materials_variants hook to be wired through. Cf. README.
@@ -97,7 +114,8 @@ export class HeroLoader {
             obj.userData[k] = v;
           }
         }
-        out.push(obj);
+        if (group) group.add(obj);
+        else out.push(obj);
       }
     }
     return out;

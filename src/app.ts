@@ -1,4 +1,4 @@
-import { Group, Mesh, type MeshStandardMaterial, type Object3D, Vector3 } from 'three';
+import { Euler, Group, Mesh, type MeshStandardMaterial, type Object3D, Quaternion, Vector3 } from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { createCamera, createRenderer, createScene } from './scene/sceneGraph';
 import type { CameraMode } from './camera/cameraMode';
@@ -284,12 +284,15 @@ export async function start(container: HTMLElement): Promise<void> {
   };
 
   const saveHeroPositions = async () => {
-    // Strategy: load the manifest fresh, replace position/rotation/scale on
-    // any hero we can unambiguously match by id, POST the result back to
-    // the dev middleware. Heroes with multiple placements (e.g. cassettes)
-    // are skipped — heroLookup only stores the last instance per id, so we
-    // can't tell which placement was just edited. Future work: index every
-    // placement separately.
+    // Strategy: load the manifest fresh, snapshot each placement's WORLD
+    // transform from the live scene (so any "#all" group offset is baked
+    // in), then write that snapshot back into the manifest. Singletons use
+    // their entry.id; multi-placement uses entry.id#index.
+    //
+    // For multi-placement we also normalize the live scene afterwards —
+    // group back at identity, children re-localized to the captured world
+    // transforms — so the user can immediately drag the group again
+    // without compounding the previous offset on top of the new manifest.
     try {
       const res = await fetch('/heroes/manifest.json', { cache: 'no-store' });
       if (!res.ok) throw new Error('manifest fetch: ' + res.status);
@@ -297,31 +300,71 @@ export async function start(container: HTMLElement): Promise<void> {
 
       const updated: string[] = [];
       const skipped: string[] = [];
-
-      for (const entry of manifest.heroes ?? []) {
-        const placements = entry.placements ?? [];
-        if (placements.length !== 1) {
-          if (placements.length > 1) skipped.push(`${entry.id} (${placements.length} placements)`);
-          continue;
-        }
-        const obj = heroLookup.get(entry.id);
-        if (!obj) {
-          skipped.push(`${entry.id} (not in scene)`);
-          continue;
-        }
-        const placement: HeroPlacement = placements[0];
-        placement.position = [r3(obj.position.x), r3(obj.position.y), r3(obj.position.z)];
-
-        const ax = r3(obj.rotation.x), ay = r3(obj.rotation.y), az = r3(obj.rotation.z);
+      const writePlacement = (
+        placement: HeroPlacement,
+        pos: Vector3,
+        quat: Quaternion,
+        scale: Vector3,
+      ): void => {
+        placement.position = [r3(pos.x), r3(pos.y), r3(pos.z)];
+        const e = new Euler().setFromQuaternion(quat);
+        const ax = r3(e.x), ay = r3(e.y), az = r3(e.z);
         if (ax === 0 && ay === 0 && az === 0) delete placement.rotation;
         else placement.rotation = [ax, ay, az];
-
-        const sx = r3(obj.scale.x), sy = r3(obj.scale.y), sz = r3(obj.scale.z);
+        const sx = r3(scale.x), sy = r3(scale.y), sz = r3(scale.z);
         if (sx === 1 && sy === 1 && sz === 1) delete placement.scale;
         else if (sx === sy && sy === sz) placement.scale = sx;
         else placement.scale = [sx, sy, sz];
+      };
 
-        updated.push(entry.id);
+      for (const entry of manifest.heroes ?? []) {
+        const placements = entry.placements ?? [];
+        const multi = placements.length > 1;
+
+        // Pass 1: snapshot world transforms BEFORE mutating anything, so
+        // resetting the group later doesn't yank the children.
+        const snaps = placements.map((_, i) => {
+          const instanceId = multi ? `${entry.id}#${i}` : entry.id;
+          const obj = heroLookup.get(instanceId);
+          const pos = new Vector3();
+          const quat = new Quaternion();
+          const scale = new Vector3();
+          if (obj) {
+            obj.getWorldPosition(pos);
+            obj.getWorldQuaternion(quat);
+            obj.getWorldScale(scale);
+          }
+          return { instanceId, obj, pos, quat, scale };
+        });
+
+        // Pass 2 (multi only): normalize the live scene — group to identity,
+        // children to the captured world transforms — so the manifest stays
+        // the single source of truth for what's on screen.
+        if (multi) {
+          const group = heroLookup.get(entry.id + '#all');
+          if (group) {
+            group.position.set(0, 0, 0);
+            group.quaternion.identity();
+            group.scale.set(1, 1, 1);
+            for (const snap of snaps) {
+              if (!snap.obj) continue;
+              snap.obj.position.copy(snap.pos);
+              snap.obj.quaternion.copy(snap.quat);
+              snap.obj.scale.copy(snap.scale);
+            }
+          }
+        }
+
+        // Pass 3: write snapshots into the manifest.
+        for (let i = 0; i < placements.length; i++) {
+          const snap = snaps[i];
+          if (!snap.obj) {
+            skipped.push(snap.instanceId + ' (not in scene)');
+            continue;
+          }
+          writePlacement(placements[i], snap.pos, snap.quat, snap.scale);
+          updated.push(snap.instanceId);
+        }
       }
 
       const saveRes = await fetch('/__lec/save-manifest', {

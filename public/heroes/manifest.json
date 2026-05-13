@@ -5,7 +5,7 @@
       "url": "/heroes/hero_speaker.glb",
       "interactive": true,
       "placements": [
-        { "state": "past", "position": [-1.8, -0.3, 0.5] }
+        { "state": "past", "position": [-1.771, 0.76, 0.079] }
       ]
     },
     {
@@ -13,7 +13,7 @@
       "url": "/heroes/hero_boombox.glb",
       "interactive": true,
       "placements": [
-        { "state": "past", "position": [0.4, -0.3, -1.8] }
+        { "state": "past", "position": [0.777, 0.823, -0.898], "rotation": [3.142, -0.893, 3.142] }
       ]
     },
     {
@@ -21,7 +21,7 @@
       "url": "/heroes/hero_amp.glb",
       "interactive": true,
       "placements": [
-        { "state": "past", "position": [-1.5, 0.1, 0.4] }
+        { "state": "past", "position": [-1.852, 0.1, -0.602], "rotation": [0, 1.19, 0] }
       ]
     },
     {
@@ -37,7 +37,7 @@
       "url": "/heroes/hero_monoblock_chair.glb",
       "interactive": false,
       "placements": [
-        { "state": "both", "position": [-1.0, -0.6, -0.7], "rotation": [0, 0.6, 0] }
+        { "state": "both", "position": [-0.01, 0.291, -1.822], "rotation": [0, 0.6, 0] }
       ]
     },
     {
