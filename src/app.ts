@@ -100,6 +100,12 @@ export async function start(container: HTMLElement): Promise<void> {
   }
   camera.position.copy(exteriorPos);
   camera.lookAt(exteriorTarget);
+  // Boot-time diagnostic so we can confirm positions.json actually applied.
+  console.log('[camera] applied exterior pose:',
+    `pos=[${camera.position.toArray().map((v) => v.toFixed(2)).join(', ')}]`,
+    `target=[${exteriorTarget.toArray().map((v) => v.toFixed(2)).join(', ')}]`,
+    `doorway=[${doorway.toArray().map((v) => v.toFixed(2)).join(', ')}]`,
+  );
 
   // Interior path lives inside SolidWallStructure's footprint (3.7×5.4m,
   // centered ~(-0.9, _, -0.5)). Tightened to 0.85m inset and routed to pass
