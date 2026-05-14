@@ -5,7 +5,12 @@
       "url": "/heroes/hero_boombox.glb",
       "interactive": true,
       "placements": [
-        { "state": "past", "position": [-0.384, 0.408, -1.722], "rotation": [0, 0, 0] }
+        {
+          "state": "past",
+          "position": [-0.384, 0.408, -1.722],
+          "rotation": [0, 0, 0],
+          "userData": { "group_id": "shop_set" }
+        }
       ]
     },
     {
@@ -17,13 +22,13 @@
           "state": "past",
           "position": [-0.58, 0.458, -1.489],
           "rotation": [0, -0.038, 0],
-          "userData": { "pile_id": "table_main", "track_id": "test_music_5", "audio_source_hero_id": "hero_boombox" }
+          "userData": { "group_id": "shop_set", "pile_id": "table_main", "track_id": "test_music_5", "audio_source_hero_id": "hero_boombox" }
         },
         {
           "state": "past",
           "position": [-0.579, 0.47, -1.502],
           "rotation": [0, -0.349, 0],
-          "userData": { "pile_id": "table_main", "track_id": "test_music_1", "audio_source_hero_id": "hero_boombox" }
+          "userData": { "group_id": "shop_set", "pile_id": "table_main", "track_id": "test_music_1", "audio_source_hero_id": "hero_boombox" }
         }
       ]
     },
@@ -36,25 +41,25 @@
           "state": "past",
           "position": [-0.569, 0.408, -1.503],
           "rotation": [0, 0.225, 0],
-          "userData": { "pile_id": "table_main", "track_id": "test_music_1", "audio_source_hero_id": "hero_boombox" }
+          "userData": { "group_id": "shop_set", "pile_id": "table_main", "track_id": "test_music_1", "audio_source_hero_id": "hero_boombox" }
         },
         {
           "state": "past",
           "position": [-0.584, 0.421, -1.495],
           "rotation": [0, -0.252, 0],
-          "userData": { "pile_id": "table_main", "track_id": "test_music_2", "audio_source_hero_id": "hero_boombox" }
+          "userData": { "group_id": "shop_set", "pile_id": "table_main", "track_id": "test_music_2", "audio_source_hero_id": "hero_boombox" }
         },
         {
           "state": "past",
           "position": [-0.579, 0.433, -1.501],
           "rotation": [0, -0.325, 0],
-          "userData": { "pile_id": "table_main", "track_id": "test_music_3", "audio_source_hero_id": "hero_boombox" }
+          "userData": { "group_id": "shop_set", "pile_id": "table_main", "track_id": "test_music_3", "audio_source_hero_id": "hero_boombox" }
         },
         {
           "state": "past",
           "position": [-0.598, 0.445, -1.493],
           "rotation": [0, 0.312, 0],
-          "userData": { "pile_id": "table_main", "track_id": "test_music_4", "audio_source_hero_id": "hero_boombox" }
+          "userData": { "group_id": "shop_set", "pile_id": "table_main", "track_id": "test_music_4", "audio_source_hero_id": "hero_boombox" }
         }
       ]
     },
@@ -63,7 +68,38 @@
       "url": "/heroes/hero_cassette_case.glb",
       "interactive": false,
       "placements": [
-        { "state": "past", "position": [-0.204, 0.408, -1.462], "rotation": [0, 0.262, 0] }
+        {
+          "state": "past",
+          "position": [-0.204, 0.408, -1.462],
+          "rotation": [0, 0.262, 0],
+          "userData": { "group_id": "shop_set" }
+        }
+      ]
+    },
+    {
+      "id": "hero_table",
+      "url": "/heroes/hero_table.glb",
+      "interactive": true,
+      "placements": [
+        {
+          "state": "both",
+          "position": [-0.381, -0.357, -1.614],
+          "rotation": [0, 0, 0],
+          "userData": { "group_id": "shop_set" }
+        }
+      ]
+    },
+    {
+      "id": "hero_chair",
+      "url": "/heroes/hero_chair.glb",
+      "interactive": true,
+      "placements": [
+        {
+          "state": "both",
+          "position": [-1.358, -0.395, -1.048],
+          "rotation": [0, 0, 0],
+          "userData": { "group_id": "shop_set" }
+        }
       ]
     }
   ]

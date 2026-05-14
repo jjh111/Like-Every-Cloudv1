@@ -294,6 +294,42 @@ export async function start(container: HTMLElement): Promise<void> {
     console.warn('[heroes] manifest load failed', e);
   }
 
+  // ── Cross-hero groups ───────────────────────────────────────────────
+  // Any placement with `userData.group_id: "<name>"` joins a shared parent
+  // empty so the dev-panel gizmo can drag the whole group as one. Members
+  // keep their identity (per-instance hero_id, individual gizmo edit still
+  // works) — the group is just an additional handle.
+  //
+  // Save flow uses getWorldPosition(), so moving the group bakes the
+  // translation into each member's stored position on the next save. The
+  // group itself returns to identity on reload (re-built from manifest).
+  {
+    const byGroupId = new Map<string, Object3D[]>();
+    for (const obj of heroLookup.values()) {
+      const gid = obj.userData?.group_id;
+      if (typeof gid === 'string' && gid.length > 0) {
+        if (!byGroupId.has(gid)) byGroupId.set(gid, []);
+        byGroupId.get(gid)!.push(obj);
+      }
+    }
+    for (const [groupId, members] of byGroupId) {
+      const groupObj = new Group();
+      groupObj.userData.hero_id = `group:${groupId}`;
+      groupObj.userData.group_id_self = groupId;
+      contentRoot.add(groupObj);
+      // .attach() reparents while preserving world transforms — members
+      // visually stay put, but moving groupObj.position now moves all of them.
+      for (const member of members) {
+        groupObj.attach(member);
+      }
+      heroLookup.set(`group:${groupId}`, groupObj);
+    }
+    if (byGroupId.size > 0) {
+      console.log(`[heroes] built ${byGroupId.size} cross-hero group(s):`,
+        Array.from(byGroupId.keys()));
+    }
+  }
+
   // ── Atmosphere ───────────────────────────────────────────────────────
   // Shaft positions/radii/tunables live in public/atmosphere/morning-shaft.json
   // so the user's last-saved values survive a refresh.

@@ -135,8 +135,16 @@ export function buildHeroDropdownMap(heroLookup: Map<string, Object3D>): Record<
   for (const k of Array.from(heroLookup.keys()).sort()) {
     const obj = heroLookup.get(k);
     if (!obj) continue;
+    if (k.startsWith('group:')) {
+      // Cross-hero group from userData.group_id — surface as a single handle
+      // that drags every member together.
+      map[`★ ${k.slice('group:'.length)} (group)`] = k;
+      continue;
+    }
     if (k.endsWith('#all')) {
-      map[`${k} (group)`] = k;
+      // Per-hero #all (multi-placement of one hero) — bulk handle for one
+      // hero's instances. Shown as `(set)` to distinguish from cross-hero groups.
+      map[`${k} (set)`] = k;
       continue;
     }
     const tag = obj.userData.state as string | undefined;

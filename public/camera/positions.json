@@ -1,9 +1,9 @@
 {
   "exterior": {
-    "position": [2.616, 1.908, 3.378],
+    "position": [2.616, 0.997, 0.65],
     "target": [-0.384, 0.408, -1.622]
   },
-  "doorway": [0.616, 0.908, -0.122],
+  "doorway": [3.428, 1.364, -0.533],
   "interiorAABB": {
     "min": [-2.81, -0.48, -3.18],
     "max": [0.93, 3.21, 2.24]
@@ -13,5 +13,8 @@
     "freeform": { "damping": 0.05, "rotateSpeed": 1, "zoomSpeed": 1 },
     "interior-walk": { "t": 0, "speed": 0.0006, "smoothing": 0.1 },
     "interior-orbit": { "t": 0, "speed": 0.0006, "smoothing": 0.1 }
+  },
+  "bookmarks": {
+    "cameras": { "position": [7.529, 1.865, -0.908], "target": [-0.384, 0.408, -1.622] }
   }
 }
