@@ -319,12 +319,15 @@ export async function start(container: HTMLElement): Promise<void> {
   const updateWallCull = (): void => {
     interiorAABB.getCenter(aabbCenter);
     interiorAABB.getSize(aabbHalf).multiplyScalar(0.5);
-    // Disabled, exterior view, or camera still inside the room — leave the
-    // plane inert so nothing clips. Large `constant` pushes it below every
-    // possible fragment, so each one is on the positive side.
+    // The cull is strictly a freeform-interior feature. Disabled / exterior
+    // view / rails / mid-tween / camera still inside the AABB → keep the
+    // plane inert so nothing clips. The "go inside" tween crosses walls by
+    // design and would look broken with mid-flight clipping; rails paths
+    // stay inside the AABB and never need it.
     if (
       !cullSettings.enabled ||
       view === 'exterior' ||
+      activeCamera !== cameras['freeform'] ||
       interiorAABB.containsPoint(camera.position)
     ) {
       clipPlane.normal.set(0, 1, 0);
