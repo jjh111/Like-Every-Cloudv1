@@ -545,10 +545,12 @@ export async function start(container: HTMLElement): Promise<void> {
     cullSettings,
     bookmarks,
     snapshotPose,
-    // The exterior marker is visible iff the user picked "edit handle:
-    // exterior" — that's our signal to preserve the gizmo-driven pose
-    // instead of snapping to the current camera on save.
+    // The exterior/doorway markers are visible iff the user picked
+    // "edit handle: exterior/doorway" in the dev panel — that's our
+    // signal to preserve the gizmo-driven pose on save instead of
+    // snapping to the current camera position.
     isEditingExteriorMarker: () => cameraHandles.exteriorMarker.visible,
+    isEditingDoorwayMarker: () => cameraHandles.doorwayMarker.visible,
   });
 
   // ── Dev panel + side-panel UIs ──────────────────────────────────────

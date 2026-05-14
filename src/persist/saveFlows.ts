@@ -164,6 +164,10 @@ export interface SaveFlowDeps {
    *  cameraHandles.syncToSources). When false, it snaps from the current
    *  camera — the "I framed a nice shot, save it" workflow. */
   isEditingExteriorMarker: () => boolean;
+  /** Same idea for the doorway marker — when true, saveCurrentAsDoorway
+   *  preserves the doorway value (set by gizmo drag → syncToSources)
+   *  instead of overwriting with the camera position. */
+  isEditingDoorwayMarker: () => boolean;
 }
 
 export interface SaveFlows {
@@ -247,12 +251,17 @@ export function createSaveFlows(deps: SaveFlowDeps): SaveFlows {
     return postCameraConfig('exterior pose saved');
   };
 
-  // Capture the camera's CURRENT world position as the doorway waypoint,
-  // then save. Workflow: orbit to the threshold of the entrance, click
-  // this, and the next inside↔outside tween will route through it.
+  // Two workflows wrapped in one save:
+  //   - Normal: orbit to the doorway threshold, hit save → doorway = camera pos.
+  //   - Marker-edit: drag the cyan doorway gizmo, hit save → preserve the
+  //     dragged value (`doorway` already reflects the marker via
+  //     cameraHandles.syncToSources). Without this branch, the camera
+  //     position would clobber the user's deliberate drag.
   const saveCurrentAsDoorway = async (): Promise<void> => {
-    const p = snapshotPose().position;
-    doorway.set(p[0], p[1], p[2]);
+    if (!deps.isEditingDoorwayMarker()) {
+      const p = snapshotPose().position;
+      doorway.set(p[0], p[1], p[2]);
+    }
     return postCameraConfig('doorway saved');
   };
 
