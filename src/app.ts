@@ -1,4 +1,4 @@
-import { Box3, Euler, Group, Mesh, MeshBasicMaterial, type MeshStandardMaterial, type Object3D, Quaternion, SphereGeometry, Vector3 } from 'three';
+import { Box3, Euler, Group, type Material, Mesh, MeshBasicMaterial, type MeshStandardMaterial, type Object3D, Plane, Quaternion, SphereGeometry, Vector3 } from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { createCamera, createRenderer, createScene } from './scene/sceneGraph';
 import type { CameraMode } from './camera/cameraMode';
@@ -28,6 +28,9 @@ export async function start(container: HTMLElement): Promise<void> {
   const camera = createCamera(window.innerWidth, window.innerHeight);
   const renderer = createRenderer();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  // Per-material clipping planes — the wall cull uses one to cut just the
+  // fragments between camera and room, not the whole occluding mesh.
+  renderer.localClippingEnabled = true;
   container.appendChild(renderer.domElement);
 
   // Camera modes.
@@ -265,57 +268,68 @@ export async function start(container: HTMLElement): Promise<void> {
     console.warn('[heroes] manifest load failed', e);
   }
 
-  // ── Wall cull ───────────────────────────────────────────────────────────
-  // Classify every mesh in the scene as "inside" or "outside" the interior
-  // AABB. Heroes are always treated as inside. When the freeform camera (in
-  // interior view) pulls back past a threshold inside the walls, hide the
-  // outside meshes so we can see in — x-ray for the photoscan exterior.
+  // ── Wall cull (clipping plane) ──────────────────────────────────────────
+  // When the camera leaves the interior AABB in interior view, a clip plane
+  // sweeps to sit on the wall closest to the camera, oriented to face the
+  // room interior. Fragments between camera and plane (= the wall + any
+  // outside geometry occluding the view) are discarded by WebGL; everything
+  // past the plane (= the room + heroes) renders normally. Walls peel
+  // smoothly as the camera orbits; no whole-mesh visibility flipping.
+  //
+  // Plane is attached as a *local* clippingPlanes entry on every photoscan
+  // material so it doesn't affect heroes. Inert when camera is inside the
+  // AABB or view is exterior — we set its `constant` to a large value so
+  // every fragment ends up on the positive side.
   scene.updateMatrixWorld(true);
-  const outsideMeshes: Mesh[] = [];
+  const clipPlane = new Plane(new Vector3(0, 1, 0), 1e6);
+  const clippedMaterials = new Set<Material>();
   {
-    const tmp = new Vector3();
     scene.traverse((obj) => {
       const mesh = obj as Mesh;
       if (!mesh.isMesh) return;
-      // Skip hero subtrees — they belong inside the room by definition.
+      // Skip hero subtrees — they live inside the room and should never clip.
       let cur: Object3D | null = mesh;
       while (cur) {
         if (cur.userData?.hero_id) return;
         cur = cur.parent;
       }
-      if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
-      const bbox = mesh.geometry.boundingBox;
-      if (!bbox) return;
-      bbox.getCenter(tmp);
-      tmp.applyMatrix4(mesh.matrixWorld);
-      if (!interiorAABB.containsPoint(tmp)) outsideMeshes.push(mesh);
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const mat of mats) {
+        if (!mat) continue;
+        if (clippedMaterials.has(mat)) continue;
+        mat.clippingPlanes = [clipPlane];
+        clippedMaterials.add(mat);
+      }
     });
-    console.log(`[cull] classified ${outsideMeshes.length} meshes as outside`);
+    console.log(`[cull] attached clip plane to ${clippedMaterials.size} materials`);
   }
 
-  // Hysteresis bands: hide once we've moved well past the wall, show only
-  // when we've come well back in. Avoids flicker on the boundary.
-  const HIDE_PAD = 0.4;
-  const SHOW_PAD = 0.7;
-  const hideThreshold = interiorAABB.clone().expandByScalar(-HIDE_PAD);
-  const showThreshold = interiorAABB.clone().expandByScalar(-SHOW_PAD);
-  let outsideHidden = false;
+  const aabbCenter = new Vector3();
+  const aabbHalf = new Vector3();
+  const tmpNormal = new Vector3();
+  const tmpPoint = new Vector3();
   const updateWallCull = (): void => {
-    if (view === 'exterior') {
-      if (outsideHidden) {
-        for (const m of outsideMeshes) m.visible = true;
-        outsideHidden = false;
-      }
+    interiorAABB.getCenter(aabbCenter);
+    interiorAABB.getSize(aabbHalf).multiplyScalar(0.5);
+    // Exterior view or camera still inside the room — leave the plane
+    // inert so nothing clips. Anything on the positive side of the plane
+    // renders; large `constant` pushes the plane far below everything.
+    if (view === 'exterior' || interiorAABB.containsPoint(camera.position)) {
+      clipPlane.normal.set(0, 1, 0);
+      clipPlane.constant = 1e6;
       return;
     }
-    const camPos = camera.position;
-    if (!outsideHidden && !hideThreshold.containsPoint(camPos)) {
-      for (const m of outsideMeshes) m.visible = false;
-      outsideHidden = true;
-    } else if (outsideHidden && showThreshold.containsPoint(camPos)) {
-      for (const m of outsideMeshes) m.visible = true;
-      outsideHidden = false;
-    }
+    // Camera is outside in interior view. Aim the plane perpendicular to
+    // the camera→room-center vector, positioned at the AABB face closest
+    // to the camera. Anything camera-side of that plane is clipped.
+    tmpNormal.subVectors(aabbCenter, camera.position).normalize();
+    // AABB half-extent projected along the normal direction:
+    const extent =
+      Math.abs(aabbHalf.x * tmpNormal.x) +
+      Math.abs(aabbHalf.y * tmpNormal.y) +
+      Math.abs(aabbHalf.z * tmpNormal.z);
+    tmpPoint.copy(aabbCenter).addScaledVector(tmpNormal, -extent);
+    clipPlane.setFromNormalAndCoplanarPoint(tmpNormal, tmpPoint);
   };
 
   // State + transition wiring.
