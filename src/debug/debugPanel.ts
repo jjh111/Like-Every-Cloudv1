@@ -38,6 +38,8 @@ export interface DebugDeps {
   saveShaftConfig: () => void;
   /** Persist exterior camera pose + per-mode tunables back to positions.json. */
   saveCameraPose: () => void;
+  /** Snapshot current camera position as the doorway waypoint + save. */
+  saveCurrentAsDoorway: () => void;
 }
 
 type Controller = ReturnType<GUI['add']>;
@@ -101,6 +103,7 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
   const cameraProxy = {
     camera: deps.initialCamera,
     saveExterior: () => deps.saveCameraPose(),
+    saveDoorway: () => deps.saveCurrentAsDoorway(),
   };
   cameraFolder.add(cameraProxy, 'camera', Object.keys(deps.cameras))
     .name('camera mode')
@@ -110,6 +113,7 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
     })
     .listen();
   cameraFolder.add(cameraProxy, 'saveExterior').name('save → positions.json');
+  cameraFolder.add(cameraProxy, 'saveDoorway').name('save current as doorway');
   // Per-camera tunables get added below cameraProxy via refreshCameraTunables.
   let cameraTunableControllers: Controller[] = [];
   function refreshCameraTunables() {

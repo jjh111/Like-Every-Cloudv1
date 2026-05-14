@@ -59,14 +59,15 @@ export class HeroLoader {
     const out: Object3D[] = [];
     for (const entry of manifest.heroes ?? []) {
       const base = await this.glb.load(entry.url);
-      // Strip any Blender-baked hero_id from inside the glb so the manifest's
-      // entry.id is the single source of truth at the top of each placed hero.
-      // Without this, an inner mesh tagged in Blender (e.g. "hero_boomboxold")
-      // shows up alongside the manifest id (e.g. "hero_boombox").
+      // Strip any Blender-baked hero_id / state from descendants so the
+      // manifest's entry.id + placement.state are the single source of
+      // truth at the hero root. Without the state strip, a state tag baked
+      // on an inner mesh wins over a runtime re-tag of the root and the
+      // dev-panel "hero state" toggle becomes a no-op.
       base.traverse((child) => {
-        if (child !== base && child.userData && 'hero_id' in child.userData) {
-          delete child.userData.hero_id;
-        }
+        if (child === base || !child.userData) return;
+        if ('hero_id' in child.userData) delete child.userData.hero_id;
+        if ('state' in child.userData) delete child.userData.state;
       });
       const placements = entry.placements ?? [];
       const multi = placements.length > 1;

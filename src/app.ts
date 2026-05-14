@@ -36,6 +36,10 @@ export async function start(container: HTMLElement): Promise<void> {
   // backup values if the file is missing or malformed.
   const exteriorPos = new Vector3(12, 5, 8);
   const exteriorTarget = new Vector3(2.0, 1.5, -1.6);
+  // Doorway: the camera tween routes through this point so we curve through
+  // the entrance instead of clipping through walls. Default = a point in
+  // front of the main door (will be overridden by saved positions.json).
+  const doorway = new Vector3(0.5, 1.3, 2.0);
   // Per-camera-mode tunables (damping/rotateSpeed/zoomSpeed for freeform,
   // speed/smoothing for rails). Loaded from positions.json and applied to
   // each camera after construction.
@@ -45,12 +49,16 @@ export async function start(container: HTMLElement): Promise<void> {
     if (camRes.ok) {
       const data = (await camRes.json()) as {
         exterior?: { position?: number[]; target?: number[] };
+        doorway?: number[];
         tunables?: Record<string, Record<string, number>>;
       };
       const p = data.exterior?.position;
       const t = data.exterior?.target;
       if (Array.isArray(p) && p.length === 3) exteriorPos.set(p[0], p[1], p[2]);
       if (Array.isArray(t) && t.length === 3) exteriorTarget.set(t[0], t[1], t[2]);
+      if (Array.isArray(data.doorway) && data.doorway.length === 3) {
+        doorway.set(data.doorway[0], data.doorway[1], data.doorway[2]);
+      }
       if (data.tunables) cameraTunablesFromDisk = data.tunables;
     }
   } catch (e) {
@@ -159,13 +167,24 @@ export async function start(container: HTMLElement): Promise<void> {
     const toTarget = v === 'exterior' ? exteriorTarget.clone() : interiorCenter.clone();
     const destName = v === 'exterior' ? 'freeform' : 'interior-orbit';
 
+    // Entering the interior: reset both rails cameras to t=0 so the rails
+    // pick up at the entrance (where the tween hands off) instead of
+    // snapping back to wherever the user had scrolled last session.
+    if (v === 'interior') {
+      (cameras['interior-walk'] as RailsMode).t = 0;
+      (cameras['interior-orbit'] as RailsMode).t = 0;
+    }
+
     activeCamera.dispose();
+    // Pass the doorway as a tween waypoint so the camera curves through
+    // the entrance instead of cutting through walls.
     activeCamera = new TweenCameraMode(
       camera,
       { position: fromPos, target: fromTarget },
       { position: toPos, target: toTarget },
       VIEW_TWEEN_DURATION,
       () => setCamera(destName),
+      doorway,
     );
     activeCamera.init();
   };
@@ -591,8 +610,13 @@ export async function start(container: HTMLElement): Promise<void> {
     };
   };
 
+  const r3v = (v: Vector3): [number, number, number] => {
+    const r = (n: number) => Math.round(n * 1000) / 1000;
+    return [r(v.x), r(v.y), r(v.z)];
+  };
   const formatCameraPositions = (data: {
     exterior: { position: [number, number, number]; target: [number, number, number] };
+    doorway: [number, number, number];
     tunables: Record<string, Record<string, number>>;
   }): string => {
     const ex = data.exterior;
@@ -606,6 +630,7 @@ export async function start(container: HTMLElement): Promise<void> {
       `    "position": [${ex.position.join(', ')}],\n` +
       `    "target": [${ex.target.join(', ')}]\n` +
       '  },\n' +
+      `  "doorway": [${data.doorway.join(', ')}],\n` +
       '  "tunables": {\n' +
       tunableLines.join(',\n') + '\n' +
       '  }\n' +
@@ -613,14 +638,19 @@ export async function start(container: HTMLElement): Promise<void> {
     );
   };
 
-  const saveCameraPose = async () => {
+  const buildCameraPayload = () => {
+    const pose = snapshotCameraPose();
+    const tunables: Record<string, Record<string, number>> = {};
+    for (const [name, cam] of Object.entries(cameras)) {
+      tunables[name] = snapshotCameraTunables(cam);
+    }
+    return { exterior: pose, doorway: r3v(doorway), tunables };
+  };
+
+  const postCameraConfig = async (label: string) => {
     try {
-      const pose = snapshotCameraPose();
-      const tunables: Record<string, Record<string, number>> = {};
-      for (const [name, cam] of Object.entries(cameras)) {
-        tunables[name] = snapshotCameraTunables(cam);
-      }
-      const body = formatCameraPositions({ exterior: pose, tunables });
+      const payload = buildCameraPayload();
+      const body = formatCameraPositions(payload);
       const res = await fetch('/__lec/save-camera', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -628,10 +658,20 @@ export async function start(container: HTMLElement): Promise<void> {
       });
       if (!res.ok) throw new Error(`save responded ${res.status}: ${await res.text()}`);
       const result = (await res.json()) as { saved?: string };
-      console.log('[camera] saved →', result.saved, { exterior: pose, tunables });
+      console.log(`[camera] ${label} → ${result.saved}`, payload);
     } catch (e) {
       console.warn('[camera] save failed', e);
     }
+  };
+
+  const saveCameraPose = () => postCameraConfig('exterior pose saved');
+
+  // Capture the camera's CURRENT world position as the doorway waypoint,
+  // then save. Workflow: orbit to the threshold of the entrance, click
+  // this, and the next inside↔outside tween will route through it.
+  const saveCurrentAsDoorway = () => {
+    doorway.copy(camera.position);
+    return postCameraConfig('doorway saved');
   };
 
   // Compact formatter to match the hand-curated layout of the existing
@@ -711,6 +751,7 @@ export async function start(container: HTMLElement): Promise<void> {
     setShaftEditTarget,
     saveShaftConfig,
     saveCameraPose,
+    saveCurrentAsDoorway,
   });
 
   // Bottom-left audio controls: mute toggle + master volume. Volume slider
