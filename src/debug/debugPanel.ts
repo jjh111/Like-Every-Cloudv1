@@ -22,13 +22,10 @@ export interface DebugDeps {
   /** High-level outside/inside toggle. */
   getView: () => 'exterior' | 'interior';
   toggleView: () => void;
-  /** Edit-mode controls — pick a hero, get a translate/rotate/scale gizmo.
+  /** Edit-mode controls — pick a hero, get a compound translate+rotate gizmo.
    *  Object-keyed: display label (e.g. "hero_speaker (past)") → bare hero id. */
   heroIds: Record<string, string>;
   setEditTarget: (heroId: string) => void;
-  setTransformMode: (mode: 'translate' | 'rotate' | 'scale') => void;
-  /** So the panel can mirror W/E/R keyboard shortcuts. */
-  getTransformMode: () => 'translate' | 'rotate' | 'scale';
   /** Persist edited positions back to public/heroes/manifest.json via dev middleware. */
   saveHeroPositions: () => void;
   /** Shaft-handle editing. Dropdown options + setter. */
@@ -40,6 +37,8 @@ export interface DebugDeps {
   saveCameraPose: () => void;
   /** Snapshot current camera position as the doorway waypoint + save. */
   saveCurrentAsDoorway: () => void;
+  /** Attach the gizmo to one of the camera handles (exterior pose / doorway). */
+  setCameraHandleEditTarget: (id: '(none)' | 'exterior' | 'doorway') => void;
 }
 
 type Controller = ReturnType<GUI['add']>;
@@ -102,6 +101,7 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
   const cameraFolder = gui.addFolder('camera');
   const cameraProxy = {
     camera: deps.initialCamera,
+    handle: '(none)' as '(none)' | 'exterior' | 'doorway',
     saveExterior: () => deps.saveCameraPose(),
     saveDoorway: () => deps.saveCurrentAsDoorway(),
   };
@@ -112,6 +112,26 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
       refreshCameraTunables();
     })
     .listen();
+  // Camera-handle dropdown: pick the exterior pose marker (green) or the
+  // doorway waypoint marker (cyan) to attach the gizmo. Cross-clears the
+  // hero edit + shaft edit dropdowns so only one gizmo target is active.
+  const cameraHandleCtrl = cameraFolder.add(cameraProxy, 'handle', ['(none)', 'exterior', 'doorway'])
+    .name('edit handle')
+    .onChange((v: '(none)' | 'exterior' | 'doorway') => {
+      if (v !== '(none)') {
+        if (editProxy.target !== '(none)') {
+          editProxy.target = '(none)';
+          editTargetCtrl.updateDisplay();
+          deps.setEditTarget('(none)');
+        }
+        if (atmosProxy.shaftHandle !== '(none)') {
+          atmosProxy.shaftHandle = '(none)';
+          shaftHandleCtrl.updateDisplay();
+          deps.setShaftEditTarget('(none)');
+        }
+      }
+      deps.setCameraHandleEditTarget(v);
+    });
   cameraFolder.add(cameraProxy, 'saveExterior').name('save → positions.json');
   cameraFolder.add(cameraProxy, 'saveDoorway').name('save current as doorway');
   // Per-camera tunables get added below cameraProxy via refreshCameraTunables.
@@ -135,7 +155,6 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
   const editFolder = gui.addFolder('edit');
   const editProxy = {
     target: '(none)',
-    mode: 'translate' as 'translate' | 'rotate' | 'scale',
     save: () => deps.saveHeroPositions(),
   };
   // editTargetCtrl is reassigned by refreshHeroDropdown when state tags
@@ -145,19 +164,21 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
     .name('edit hero')
     .onChange(onEditTargetChanged);
   function onEditTargetChanged(v: string): void {
-    // Picking a hero clears any shaft-handle selection — only one gizmo
-    // target at a time, otherwise the panel becomes a liar.
-    if (v !== '(none)' && atmosProxy.shaftHandle !== '(none)') {
-      atmosProxy.shaftHandle = '(none)';
-      shaftHandleCtrl.updateDisplay();
-      deps.setShaftEditTarget('(none)');
+    // Picking a hero clears any other gizmo selection — one target at a time.
+    if (v !== '(none)') {
+      if (atmosProxy.shaftHandle !== '(none)') {
+        atmosProxy.shaftHandle = '(none)';
+        shaftHandleCtrl.updateDisplay();
+        deps.setShaftEditTarget('(none)');
+      }
+      if (cameraProxy.handle !== '(none)') {
+        cameraProxy.handle = '(none)';
+        cameraHandleCtrl.updateDisplay();
+        deps.setCameraHandleEditTarget('(none)');
+      }
     }
     deps.setEditTarget(v);
   }
-  editFolder.add(editProxy, 'mode', ['translate', 'rotate', 'scale'])
-    .name('mode (W/E/R)')
-    .onChange((v: 'translate' | 'rotate' | 'scale') => deps.setTransformMode(v))
-    .listen();
   editFolder.add(editProxy, 'save').name('save → manifest.json');
 
   // ── atmosphere ─────────────────────────────────────────────────────────
@@ -199,11 +220,18 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
   const shaftHandleCtrl = atmosFolder.add(atmosProxy, 'shaftHandle', deps.shaftHandleIds)
     .name('edit shaft')
     .onChange((v: string) => {
-      // Symmetric: picking a shaft handle clears the hero gizmo.
-      if (v !== '(none)' && editProxy.target !== '(none)') {
-        editProxy.target = '(none)';
-        editTargetCtrl.updateDisplay();
-        deps.setEditTarget('(none)');
+      // Symmetric: picking a shaft handle clears the other gizmo targets.
+      if (v !== '(none)') {
+        if (editProxy.target !== '(none)') {
+          editProxy.target = '(none)';
+          editTargetCtrl.updateDisplay();
+          deps.setEditTarget('(none)');
+        }
+        if (cameraProxy.handle !== '(none)') {
+          cameraProxy.handle = '(none)';
+          cameraHandleCtrl.updateDisplay();
+          deps.setCameraHandleEditTarget('(none)');
+        }
       }
       deps.setShaftEditTarget(v);
     });
@@ -249,7 +277,6 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
     stateProxy.progress = deps.state.progress;
     stateProxy.duration = deps.state.duration;
     audioProxy.muted = deps.audio.muted;
-    editProxy.mode = deps.getTransformMode();
     viewBtn.name(deps.getView() === 'exterior' ? 'go inside →' : '← go outside');
 
     const activeCam = deps.getActiveCamera();

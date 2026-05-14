@@ -5,7 +5,7 @@
       "url": "/heroes/hero_speaker.glb",
       "interactive": true,
       "placements": [
-        { "state": "past", "position": [-1.771, 0.76, 0.079] }
+        { "state": "present", "position": [-1.771, 0.76, 0.079] }
       ]
     },
     {
@@ -37,7 +37,7 @@
       "url": "/heroes/hero_monoblock_chair.glb",
       "interactive": false,
       "placements": [
-        { "state": "both", "position": [-0.01, 0.291, -1.822], "rotation": [0, 0.6, 0] }
+        { "state": "both", "position": [-1.155, 0.162, -0.337], "rotation": [0, 0.832, 0] }
       ]
     },
     {

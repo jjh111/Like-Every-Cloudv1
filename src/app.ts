@@ -1,4 +1,4 @@
-import { Euler, Group, Mesh, type MeshStandardMaterial, type Object3D, Quaternion, Vector3 } from 'three';
+import { Box3, Euler, Group, Mesh, MeshBasicMaterial, type MeshStandardMaterial, type Object3D, Quaternion, SphereGeometry, Vector3 } from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { createCamera, createRenderer, createScene } from './scene/sceneGraph';
 import type { CameraMode } from './camera/cameraMode';
@@ -40,6 +40,13 @@ export async function start(container: HTMLElement): Promise<void> {
   // the entrance instead of clipping through walls. Default = a point in
   // front of the main door (will be overridden by saved positions.json).
   const doorway = new Vector3(0.5, 1.3, 2.0);
+  // Interior bounds: when the freeform camera (in interior view) zooms out
+  // past these walls, the photoscan's outside-the-room geometry hides so the
+  // user can see in. Loose-ish defaults that we tighten via positions.json.
+  const interiorAABB = new Box3(
+    new Vector3(-2.75, -0.5, -3.2),
+    new Vector3(1.0, 3.5, 2.5),
+  );
   // Per-camera-mode tunables (damping/rotateSpeed/zoomSpeed for freeform,
   // speed/smoothing for rails). Loaded from positions.json and applied to
   // each camera after construction.
@@ -50,6 +57,7 @@ export async function start(container: HTMLElement): Promise<void> {
       const data = (await camRes.json()) as {
         exterior?: { position?: number[]; target?: number[] };
         doorway?: number[];
+        interiorAABB?: { min?: number[]; max?: number[] };
         tunables?: Record<string, Record<string, number>>;
       };
       const p = data.exterior?.position;
@@ -59,6 +67,10 @@ export async function start(container: HTMLElement): Promise<void> {
       if (Array.isArray(data.doorway) && data.doorway.length === 3) {
         doorway.set(data.doorway[0], data.doorway[1], data.doorway[2]);
       }
+      const aMin = data.interiorAABB?.min;
+      const aMax = data.interiorAABB?.max;
+      if (Array.isArray(aMin) && aMin.length === 3) interiorAABB.min.set(aMin[0], aMin[1], aMin[2]);
+      if (Array.isArray(aMax) && aMax.length === 3) interiorAABB.max.set(aMax[0], aMax[1], aMax[2]);
       if (data.tunables) cameraTunablesFromDisk = data.tunables;
     }
   } catch (e) {
@@ -253,6 +265,59 @@ export async function start(container: HTMLElement): Promise<void> {
     console.warn('[heroes] manifest load failed', e);
   }
 
+  // ── Wall cull ───────────────────────────────────────────────────────────
+  // Classify every mesh in the scene as "inside" or "outside" the interior
+  // AABB. Heroes are always treated as inside. When the freeform camera (in
+  // interior view) pulls back past a threshold inside the walls, hide the
+  // outside meshes so we can see in — x-ray for the photoscan exterior.
+  scene.updateMatrixWorld(true);
+  const outsideMeshes: Mesh[] = [];
+  {
+    const tmp = new Vector3();
+    scene.traverse((obj) => {
+      const mesh = obj as Mesh;
+      if (!mesh.isMesh) return;
+      // Skip hero subtrees — they belong inside the room by definition.
+      let cur: Object3D | null = mesh;
+      while (cur) {
+        if (cur.userData?.hero_id) return;
+        cur = cur.parent;
+      }
+      if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+      const bbox = mesh.geometry.boundingBox;
+      if (!bbox) return;
+      bbox.getCenter(tmp);
+      tmp.applyMatrix4(mesh.matrixWorld);
+      if (!interiorAABB.containsPoint(tmp)) outsideMeshes.push(mesh);
+    });
+    console.log(`[cull] classified ${outsideMeshes.length} meshes as outside`);
+  }
+
+  // Hysteresis bands: hide once we've moved well past the wall, show only
+  // when we've come well back in. Avoids flicker on the boundary.
+  const HIDE_PAD = 0.4;
+  const SHOW_PAD = 0.7;
+  const hideThreshold = interiorAABB.clone().expandByScalar(-HIDE_PAD);
+  const showThreshold = interiorAABB.clone().expandByScalar(-SHOW_PAD);
+  let outsideHidden = false;
+  const updateWallCull = (): void => {
+    if (view === 'exterior') {
+      if (outsideHidden) {
+        for (const m of outsideMeshes) m.visible = true;
+        outsideHidden = false;
+      }
+      return;
+    }
+    const camPos = camera.position;
+    if (!outsideHidden && !hideThreshold.containsPoint(camPos)) {
+      for (const m of outsideMeshes) m.visible = false;
+      outsideHidden = true;
+    } else if (outsideHidden && showThreshold.containsPoint(camPos)) {
+      for (const m of outsideMeshes) m.visible = true;
+      outsideHidden = false;
+    }
+  };
+
   // State + transition wiring.
   const stateController = new StateController();
   const transitions: Record<string, Transition> = {
@@ -328,35 +393,68 @@ export async function start(container: HTMLElement): Promise<void> {
   const pointer = new PointerInteraction(renderer.domElement, camera, contentRoot);
   pointer.attach();
 
-  // Debug gizmo for moving heroes around at runtime. Attached on demand from
-  // the dev panel. Disables OrbitControls while dragging so the camera
-  // doesn't fight the user. In recent three.js, the visible gizmo is a
-  // separate helper Object3D — add that to the scene, not TransformControls
-  // itself.
-  const transformControls = new TransformControls(camera, renderer.domElement);
-  const transformHelper = transformControls.getHelper();
-  transformHelper.visible = false;
-  transformControls.enabled = false;
-  scene.add(transformHelper);
-  transformControls.addEventListener('dragging-changed', (event) => {
-    const dragging = (event as unknown as { value: boolean }).value;
-    // Reach the OrbitControls instance inside FreeformMode if active
+  // Compound gizmo: a separate TransformControls for translate and rotate,
+  // both attached to the target object. The dev panel shows them
+  // simultaneously, so the user can grab an arrow OR a ring without
+  // toggling modes. Shaft handles get only the translate gizmo since
+  // points have nothing to rotate.
+  const tcMove = new TransformControls(camera, renderer.domElement);
+  tcMove.setMode('translate');
+  const tcRotate = new TransformControls(camera, renderer.domElement);
+  tcRotate.setMode('rotate');
+  // Slightly larger so the rotation rings sit outside the translate arrows
+  // and don't fight for pointer hits.
+  tcRotate.setSize(1.25);
+  const helperMove = tcMove.getHelper();
+  const helperRotate = tcRotate.getHelper();
+  helperMove.visible = false;
+  helperRotate.visible = false;
+  tcMove.enabled = false;
+  tcRotate.enabled = false;
+  scene.add(helperMove);
+  scene.add(helperRotate);
+  const onGizmoDrag = (event: unknown) => {
+    const dragging = (event as { value: boolean }).value;
     const fm = activeCamera as unknown as { controls?: { enabled: boolean } };
     if (fm.controls) fm.controls.enabled = !dragging;
-  });
+  };
+  tcMove.addEventListener('dragging-changed', onGizmoDrag);
+  tcRotate.addEventListener('dragging-changed', onGizmoDrag);
+
+  type GizmoMode = 'compound' | 'translate-only';
+  const attachGizmo = (obj: Object3D | null, mode: GizmoMode = 'compound'): void => {
+    if (!obj) {
+      tcMove.detach();
+      tcRotate.detach();
+      helperMove.visible = false;
+      helperRotate.visible = false;
+      tcMove.enabled = false;
+      tcRotate.enabled = false;
+      return;
+    }
+    tcMove.attach(obj);
+    helperMove.visible = true;
+    tcMove.enabled = true;
+    if (mode === 'compound') {
+      tcRotate.attach(obj);
+      helperRotate.visible = true;
+      tcRotate.enabled = true;
+    } else {
+      tcRotate.detach();
+      helperRotate.visible = false;
+      tcRotate.enabled = false;
+    }
+  };
+  const getGizmoTarget = (): Object3D | null => (tcMove.object as Object3D | null) ?? null;
 
   const setEditTarget = (heroId: string) => {
     if (heroId === '(none)') {
-      transformControls.detach();
-      transformHelper.visible = false;
-      transformControls.enabled = false;
+      attachGizmo(null);
       return;
     }
     const obj = heroLookup.get(heroId);
     if (!obj) return;
-    transformControls.attach(obj);
-    transformHelper.visible = true;
-    transformControls.enabled = true;
+    attachGizmo(obj, 'compound');
     // Auto-switch to freeform so the user can orbit around the gizmo —
     // but keep the camera exactly where it is. We park the orbit pivot
     // on the camera's current forward ray (at the hero's depth) so
@@ -375,25 +473,6 @@ export async function start(container: HTMLElement): Promise<void> {
       (activeCamera as FreeformMode).init(options);
     }
   };
-
-  let currentTransformMode: 'translate' | 'rotate' | 'scale' = 'translate';
-  const setTransformMode = (mode: 'translate' | 'rotate' | 'scale') => {
-    currentTransformMode = mode;
-    transformControls.setMode(mode);
-  };
-  const getTransformMode = () => currentTransformMode;
-
-  // Blender/Maya-ish shortcuts so I can flip the gizmo while dragging the
-  // camera around: W=translate, E=rotate, R=scale. Only fire when something
-  // is actually attached and the user isn't typing in a dev-panel input.
-  window.addEventListener('keydown', (e) => {
-    const t = e.target as HTMLElement | null;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-    if (!transformControls.object) return;
-    if (e.key === 'w' || e.key === 'W') setTransformMode('translate');
-    else if (e.key === 'e' || e.key === 'E') setTransformMode('rotate');
-    else if (e.key === 'r' || e.key === 'R') setTransformMode('scale');
-  });
 
   // Round to 3dp — matches what the rest of the manifest already uses.
   const r3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -559,21 +638,78 @@ export async function start(container: HTMLElement): Promise<void> {
     shaftHandleIds.push(`shaft ${i} origin`, `shaft ${i} aim`);
   }
 
-  // Now that TransformControls + MorningShaft both exist, wire the
-  // detach helper that setView calls before its camera tween.
+  // Camera-handle markers — colored spheres at the exterior pose + doorway
+  // waypoint. Hidden until the user picks one in the dev panel. Dragging
+  // them updates exteriorPos / doorway (positions are aliased to the
+  // marker.position vectors so a drag mutation flows through).
+  const makeCameraHandle = (color: number, at: Vector3): Mesh => {
+    const m = new Mesh(
+      new SphereGeometry(0.09, 14, 12),
+      new MeshBasicMaterial({
+        color,
+        depthTest: false,
+        transparent: true,
+        opacity: 0.85,
+      }),
+    );
+    m.renderOrder = 100;
+    m.visible = false;
+    m.position.copy(at);
+    scene.add(m);
+    return m;
+  };
+  const exteriorMarker = makeCameraHandle(0x4dffa6, exteriorPos);
+  const doorwayMarker = makeCameraHandle(0x4dc8ff, doorway);
+  // Re-alias the existing Vector3s onto the markers so a drag mutation is
+  // automatically reflected in the source of truth (these are the same
+  // refs the tween destinations + save flow already use).
+  exteriorPos.copy(exteriorMarker.position);
+  // Note: exteriorPos and exteriorMarker.position are separate Vector3s.
+  // Sync from marker → exteriorPos happens in the tick below.
+
+  type CameraHandleId = '(none)' | 'exterior' | 'doorway';
+  const setCameraHandleEditTarget = (id: CameraHandleId) => {
+    exteriorMarker.visible = false;
+    doorwayMarker.visible = false;
+    if (id === '(none)') {
+      attachGizmo(null);
+      return;
+    }
+    const marker = id === 'exterior' ? exteriorMarker : doorwayMarker;
+    marker.visible = true;
+    attachGizmo(marker, 'translate-only');
+    // Land in freeform so the user can orbit around the handle.
+    if (activeCamera !== cameras['freeform']) {
+      const handlePos = marker.position.clone();
+      const distance = Math.max(0.5, camera.position.distanceTo(handlePos));
+      const forward = new Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      const orbitTarget = camera.position.clone().add(forward.multiplyScalar(distance));
+      activeCamera.dispose();
+      activeCamera = cameras['freeform'];
+      (activeCamera as FreeformMode).init({ target: orbitTarget });
+    }
+  };
+
+  // Per-tick: mirror marker positions to the source-of-truth Vector3s so a
+  // gizmo drag flows through to the tween + save flow without extra plumbing.
+  const syncCameraHandles = () => {
+    if (!exteriorPos.equals(exteriorMarker.position)) exteriorPos.copy(exteriorMarker.position);
+    if (!doorway.equals(doorwayMarker.position)) doorway.copy(doorwayMarker.position);
+  };
+
+  // Now that the gizmo + MorningShaft both exist, wire the detach helper
+  // that setView calls before its camera tween.
   detachGizmos = () => {
-    transformControls.detach();
-    transformHelper.visible = false;
-    transformControls.enabled = false;
+    attachGizmo(null);
     morningShaft.setHandlesVisible(false);
+    exteriorMarker.visible = false;
+    doorwayMarker.visible = false;
   };
 
   const setShaftEditTarget = (id: string) => {
     if (id === '(none)') {
       morningShaft.setHandlesVisible(false);
-      transformControls.detach();
-      transformHelper.visible = false;
-      transformControls.enabled = false;
+      attachGizmo(null);
       return;
     }
     const m = id.match(/^shaft (\d+) (origin|aim)$/);
@@ -583,11 +719,8 @@ export async function start(container: HTMLElement): Promise<void> {
     const handle = morningShaft.getShaftHandle(index, role);
     if (!handle) return;
     morningShaft.setHandlesVisible(true);
-    transformControls.attach(handle);
-    transformHelper.visible = true;
-    transformControls.enabled = true;
     // Endpoints are points — only translate makes sense.
-    setTransformMode('translate');
+    attachGizmo(handle, 'translate-only');
     // Land in freeform so the user can orbit around the handle.
     if (activeCamera !== cameras['freeform']) {
       const handlePos = handle.position.clone();
@@ -617,9 +750,11 @@ export async function start(container: HTMLElement): Promise<void> {
   const formatCameraPositions = (data: {
     exterior: { position: [number, number, number]; target: [number, number, number] };
     doorway: [number, number, number];
+    interiorAABB: { min: [number, number, number]; max: [number, number, number] };
     tunables: Record<string, Record<string, number>>;
   }): string => {
     const ex = data.exterior;
+    const ai = data.interiorAABB;
     const tunableLines = Object.entries(data.tunables).map(([name, vals]) => {
       const pairs = Object.entries(vals).map(([k, v]) => `"${k}": ${v}`).join(', ');
       return `    "${name}": { ${pairs} }`;
@@ -631,6 +766,10 @@ export async function start(container: HTMLElement): Promise<void> {
       `    "target": [${ex.target.join(', ')}]\n` +
       '  },\n' +
       `  "doorway": [${data.doorway.join(', ')}],\n` +
+      '  "interiorAABB": {\n' +
+      `    "min": [${ai.min.join(', ')}],\n` +
+      `    "max": [${ai.max.join(', ')}]\n` +
+      '  },\n' +
       '  "tunables": {\n' +
       tunableLines.join(',\n') + '\n' +
       '  }\n' +
@@ -644,7 +783,12 @@ export async function start(container: HTMLElement): Promise<void> {
     for (const [name, cam] of Object.entries(cameras)) {
       tunables[name] = snapshotCameraTunables(cam);
     }
-    return { exterior: pose, doorway: r3v(doorway), tunables };
+    return {
+      exterior: pose,
+      doorway: r3v(doorway),
+      interiorAABB: { min: r3v(interiorAABB.min), max: r3v(interiorAABB.max) },
+      tunables,
+    };
   };
 
   const postCameraConfig = async (label: string) => {
@@ -744,14 +888,13 @@ export async function start(container: HTMLElement): Promise<void> {
     toggleView: () => setView(getView() === 'exterior' ? 'interior' : 'exterior'),
     heroIds: buildHeroDropdownMap(heroLookup),
     setEditTarget,
-    setTransformMode,
-    getTransformMode,
     saveHeroPositions,
     shaftHandleIds,
     setShaftEditTarget,
     saveShaftConfig,
     saveCameraPose,
     saveCurrentAsDoorway,
+    setCameraHandleEditTarget,
   });
 
   // Bottom-left audio controls: mute toggle + master volume. Volume slider
@@ -804,7 +947,9 @@ export async function start(container: HTMLElement): Promise<void> {
     camera,
     renderer,
     heroLookup,
-    transformControls,
+    tcMove,
+    tcRotate,
+    get gizmoTarget() { return getGizmoTarget(); },
     audio,
     atmospheres,
     morningShaft,
@@ -821,6 +966,12 @@ export async function start(container: HTMLElement): Promise<void> {
     active.update(stateController.context);
     activeCamera.update(dt);
     activeAtmosphere.update(atmosphereCtx, dt);
+    // Mirror any gizmo-driven marker changes into the source-of-truth
+    // vectors that the tween + save flow read.
+    syncCameraHandles();
+    // Run cull AFTER transition update — wall cull is the final say on
+    // outside-mesh visibility regardless of state opacity.
+    updateWallCull();
     audio.syncSpatial(camera);
 
     const musicActive = audio.isChannelActive('music');
