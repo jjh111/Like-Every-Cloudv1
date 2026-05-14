@@ -113,6 +113,27 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
       refreshCameraTunables();
     })
     .listen();
+  // Per-mode tunables get their own sub-folder so they sit visually next
+  // to the camera-mode dropdown regardless of when they're added/removed.
+  // Without this, refreshCameraTunables would append fresh controllers to
+  // the END of the camera folder on every mode swap and push past the
+  // save buttons.
+  const cameraTunablesFolder = cameraFolder.addFolder('tunables (active mode)');
+  let cameraTunableControllers: Controller[] = [];
+  function refreshCameraTunables() {
+    for (const c of cameraTunableControllers) c.destroy();
+    cameraTunableControllers = [];
+    const { target, specs } = deps.getActiveCamera().getTunables();
+    for (const s of specs) {
+      const c = cameraTunablesFolder
+        .add(target as Record<string, number>, s.key, s.min, s.max, s.step)
+        .name(s.label)
+        .listen();
+      cameraTunableControllers.push(c);
+    }
+  }
+  refreshCameraTunables();
+
   // Camera-handle dropdown: pick the exterior pose marker (green) or the
   // doorway waypoint marker (cyan) to attach the gizmo. Cross-clears the
   // hero edit + shaft edit dropdowns so only one gizmo target is active.
@@ -133,8 +154,7 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
       }
       deps.setCameraHandleEditTarget(v);
     });
-  cameraFolder.add(cameraProxy, 'saveExterior').name('save → positions.json');
-  cameraFolder.add(cameraProxy, 'saveDoorway').name('save current as doorway');
+
   // Wall-cull controls. `offset` pushes the clip plane deeper into the room
   // (positive = less wall cut, plane sits further from the camera).
   cameraFolder.add(deps.cullSettings, 'enabled')
@@ -143,21 +163,13 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
   cameraFolder.add(deps.cullSettings, 'offset', -1, 3, 0.05)
     .name('cull offset (m)')
     .listen();
-  // Per-camera tunables get added below cameraProxy via refreshCameraTunables.
-  let cameraTunableControllers: Controller[] = [];
-  function refreshCameraTunables() {
-    for (const c of cameraTunableControllers) c.destroy();
-    cameraTunableControllers = [];
-    const { target, specs } = deps.getActiveCamera().getTunables();
-    for (const s of specs) {
-      const c = cameraFolder
-        .add(target as Record<string, number>, s.key, s.min, s.max, s.step)
-        .name(s.label)
-        .listen();
-      cameraTunableControllers.push(c);
-    }
-  }
-  refreshCameraTunables();
+
+  // Save buttons at the bottom — these commit *everything* in this folder
+  // (exterior pose, doorway, AABB, cull settings, per-mode tunables) to
+  // positions.json. Keeping them last so they're the obvious "done"
+  // button after a session of tuning above.
+  cameraFolder.add(cameraProxy, 'saveDoorway').name('save current as doorway');
+  cameraFolder.add(cameraProxy, 'saveExterior').name('save → positions.json (all)');
 
   // ── edit ───────────────────────────────────────────────────────────────
   const editFolder = gui.addFolder('edit');
