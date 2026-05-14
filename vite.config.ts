@@ -95,9 +95,51 @@ function atmosphereWriter(): Plugin {
   };
 }
 
+// Same pattern as the other writers — pinned to one file path, dev-only.
+function cameraWriter(): Plugin {
+  return {
+    name: 'lec-camera-writer',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use('/__lec/save-camera', (req, res, next) => {
+        if (req.method !== 'POST') {
+          next();
+          return;
+        }
+        let body = '';
+        req.on('data', (chunk: Buffer) => { body += chunk.toString('utf8'); });
+        req.on('end', () => {
+          try {
+            const parsed = JSON.parse(body) as { exterior?: unknown };
+            if (!parsed || typeof parsed.exterior !== 'object') {
+              res.statusCode = 400;
+              res.end('expected { exterior: { position, target } }');
+              return;
+            }
+            const out = resolve(process.cwd(), 'public/camera/positions.json');
+            mkdirSync(dirname(out), { recursive: true });
+            const trailingNewline = body.endsWith('\n') ? '' : '\n';
+            writeFileSync(out, body + trailingNewline);
+            res.statusCode = 200;
+            res.setHeader('content-type', 'application/json');
+            res.end(JSON.stringify({ saved: out }));
+          } catch (e) {
+            res.statusCode = 400;
+            res.end(String(e));
+          }
+        });
+        req.on('error', () => {
+          res.statusCode = 500;
+          res.end('stream error');
+        });
+      });
+    },
+  };
+}
+
 export default defineConfig({
   publicDir: 'public',
-  plugins: [manifestWriter(), atmosphereWriter()],
+  plugins: [manifestWriter(), atmosphereWriter(), cameraWriter()],
   server: {
     port: 5173,
     open: false,

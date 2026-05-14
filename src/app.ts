@@ -5,6 +5,7 @@ import type { CameraMode } from './camera/cameraMode';
 import { FreeformMode } from './camera/freeformMode';
 import type { FreeformInitOptions } from './camera/freeformMode';
 import { RailsMode } from './camera/railsMode';
+import { TweenCameraMode } from './camera/tweenMode';
 import { StateController } from './state/stateController';
 import { InstantSwap } from './transitions/instantSwap';
 import { OpacityCrossfade } from './transitions/opacityCrossfade';
@@ -30,11 +31,33 @@ export async function start(container: HTMLElement): Promise<void> {
   container.appendChild(renderer.domElement);
 
   // Camera modes.
-  // Exterior target = photoscan center, used for the freeform orbit.
+  // Exterior pose lives in public/camera/positions.json so the user can save
+  // a preferred establishing shot via the dev panel. Defaults below are
+  // backup values if the file is missing or malformed.
+  const exteriorPos = new Vector3(12, 5, 8);
+  const exteriorTarget = new Vector3(2.0, 1.5, -1.6);
+  try {
+    const camRes = await fetch('/camera/positions.json', { cache: 'no-store' });
+    if (camRes.ok) {
+      const data = (await camRes.json()) as {
+        exterior?: { position?: number[]; target?: number[] };
+      };
+      const p = data.exterior?.position;
+      const t = data.exterior?.target;
+      if (Array.isArray(p) && p.length === 3) exteriorPos.set(p[0], p[1], p[2]);
+      if (Array.isArray(t) && t.length === 3) exteriorTarget.set(t[0], t[1], t[2]);
+    }
+  } catch (e) {
+    console.warn('[camera] positions.json load failed, using defaults', e);
+  }
+  // Apply the loaded exterior pose so the page opens at the saved shot
+  // rather than the createCamera() boot defaults.
+  camera.position.copy(exteriorPos);
+  camera.lookAt(exteriorTarget);
+
   // Interior path lives inside SolidWallStructure's footprint (3.7×5.4m,
   // centered ~(-0.9, _, -0.5)). Tightened to 0.85m inset and routed to pass
   // near each hero's placement so the walk reads as a tour.
-  const exteriorTarget = new Vector3(2.0, 1.5, -1.6);
   const interiorCenter = new Vector3(-0.9, 1.0, -0.5);
   const interiorPath: Vector3[] = [
     new Vector3( 0.1, 1.0,  1.2),  // front-right (near entrance)
@@ -71,20 +94,42 @@ export async function start(container: HTMLElement): Promise<void> {
   };
   const getActiveCamera = () => activeCamera;
 
-  // View state — high-level "are we outside or inside" toggle. The dev panel
-  // exposes a single button that flips this, which in turn picks the camera
-  // mode. Users can still fine-tune via the camera mode dropdown.
+  // View state — high-level "are we outside or inside" toggle. Animated via
+  // TweenCameraMode so the camera glides between exterior/interior poses
+  // rather than snapping. After the tween completes, control hands off to
+  // freeform (outside) or interior-orbit (inside).
   let view: 'exterior' | 'interior' = 'exterior';
+  const VIEW_TWEEN_DURATION = 1.6;
+  const currentTarget = (): Vector3 => {
+    const t = new Vector3();
+    const cur = activeCamera as unknown as { controls?: { target: Vector3 } };
+    if (cur.controls) {
+      t.copy(cur.controls.target);
+    } else {
+      // Rails / tween / etc: use a point on the forward ray as a stand-in
+      // so the tween rotation matches the current view direction.
+      const fwd = new Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      t.copy(camera.position).add(fwd.multiplyScalar(5));
+    }
+    return t;
+  };
   const setView = (v: 'exterior' | 'interior') => {
     view = v;
-    if (v === 'exterior') {
-      // Snap camera back to the establishing shot before re-engaging freeform.
-      camera.position.set(12, 5, 8);
-      camera.lookAt(2.0, 1.5, -1.6);
-      setCamera('freeform');
-    } else {
-      setCamera('interior-orbit');
-    }
+    const fromPos = camera.position.clone();
+    const fromTarget = currentTarget();
+    const toPos = v === 'exterior' ? exteriorPos.clone() : interiorPath[0].clone();
+    const toTarget = v === 'exterior' ? exteriorTarget.clone() : interiorCenter.clone();
+    const destName = v === 'exterior' ? 'freeform' : 'interior-orbit';
+
+    activeCamera.dispose();
+    activeCamera = new TweenCameraMode(
+      camera,
+      { position: fromPos, target: fromTarget },
+      { position: toPos, target: toTarget },
+      VIEW_TWEEN_DURATION,
+      () => setCamera(destName),
+    );
+    activeCamera.init();
   };
   const getView = () => view;
 
@@ -476,6 +521,52 @@ export async function start(container: HTMLElement): Promise<void> {
 
   const logShaftConfig = () => morningShaft.logShaftConfig();
 
+  // Snapshot current camera pose (position + OrbitControls target if any).
+  // Used by both log and save.
+  const snapshotCameraPose = (): { position: [number, number, number]; target: [number, number, number] } => {
+    const r = (n: number) => Math.round(n * 1000) / 1000;
+    const tgt = currentTarget();
+    return {
+      position: [r(camera.position.x), r(camera.position.y), r(camera.position.z)],
+      target: [r(tgt.x), r(tgt.y), r(tgt.z)],
+    };
+  };
+
+  const logCameraPose = () => {
+    console.log('[camera] exterior pose\n' + JSON.stringify(snapshotCameraPose(), null, 2));
+  };
+
+  const formatCameraPositions = (data: {
+    exterior: { position: [number, number, number]; target: [number, number, number] };
+  }): string => {
+    const ex = data.exterior;
+    return (
+      '{\n' +
+      '  "exterior": {\n' +
+      `    "position": [${ex.position.join(', ')}],\n` +
+      `    "target": [${ex.target.join(', ')}]\n` +
+      '  }\n' +
+      '}\n'
+    );
+  };
+
+  const saveCameraPose = async () => {
+    try {
+      const pose = snapshotCameraPose();
+      const body = formatCameraPositions({ exterior: pose });
+      const res = await fetch('/__lec/save-camera', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      });
+      if (!res.ok) throw new Error(`save responded ${res.status}: ${await res.text()}`);
+      const result = (await res.json()) as { saved?: string };
+      console.log('[camera] saved →', result.saved, pose);
+    } catch (e) {
+      console.warn('[camera] save failed', e);
+    }
+  };
+
   // Compact formatter to match the hand-curated layout of the existing
   // atmosphere JSON — one shaft per line, primitives inline.
   const formatShaftsManifest = (shafts: ReturnType<MorningShaft['getCurrentShafts']>): string => {
@@ -567,6 +658,8 @@ export async function start(container: HTMLElement): Promise<void> {
     setShaftEditTarget,
     logShaftConfig,
     saveShaftConfig,
+    logCameraPose,
+    saveCameraPose,
   });
 
   // Bottom-left audio controls: mute toggle + master volume. Volume slider

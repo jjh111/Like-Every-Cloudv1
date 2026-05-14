@@ -37,6 +37,9 @@ export interface DebugDeps {
   logShaftConfig: () => void;
   /** Persist shaft endpoints/radii back to morning-shaft.json. */
   saveShaftConfig: () => void;
+  /** Capture the exterior camera pose — log to console / save to disk. */
+  logCameraPose: () => void;
+  saveCameraPose: () => void;
 }
 
 type Controller = ReturnType<GUI['add']>;
@@ -90,7 +93,11 @@ export function createDebugPanel(deps: DebugDeps): GUI {
 
   // ── camera ─────────────────────────────────────────────────────────────
   const cameraFolder = gui.addFolder('camera');
-  const cameraProxy = { camera: deps.initialCamera };
+  const cameraProxy = {
+    camera: deps.initialCamera,
+    logExterior: () => deps.logCameraPose(),
+    saveExterior: () => deps.saveCameraPose(),
+  };
   cameraFolder.add(cameraProxy, 'camera', Object.keys(deps.cameras))
     .name('camera mode')
     .onChange((v: string) => {
@@ -98,6 +105,8 @@ export function createDebugPanel(deps: DebugDeps): GUI {
       refreshCameraTunables();
     })
     .listen();
+  cameraFolder.add(cameraProxy, 'logExterior').name('log exterior pose');
+  cameraFolder.add(cameraProxy, 'saveExterior').name('save → positions.json');
   // Per-camera tunables get added below cameraProxy via refreshCameraTunables.
   let cameraTunableControllers: Controller[] = [];
   function refreshCameraTunables() {
