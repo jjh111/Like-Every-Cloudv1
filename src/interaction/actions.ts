@@ -7,6 +7,10 @@ import type { StateName } from '../state/types';
 export interface EventInfo {
   object?: Object3D;
   heroId?: string;
+  /** For 'stateEnter' events: the new target state. Used by the whenState
+   *  matcher so rules can fire on the new state before the transition
+   *  finishes (current is still the old one until progress reaches 1). */
+  state?: StateName;
 }
 
 // Spatial origin for audio actions. The engine resolves this to a concrete
@@ -56,10 +60,11 @@ export type Action =
   | { kind: 'callback'; fn: (info: EventInfo) => void };
 
 export type PointerEventName = 'click' | 'hoverIn' | 'hoverOut';
+export type EventName = PointerEventName | 'load' | 'stateEnter';
 
 export interface InteractionRule {
   match: {
-    event: PointerEventName | 'load';
+    event: EventName;
     /** Exact match against the target's hero_id. */
     heroId?: string;
     /** Prefix match — handy for grouping (e.g. all 'cassette_*'). */

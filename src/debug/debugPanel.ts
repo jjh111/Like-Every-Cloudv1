@@ -22,8 +22,9 @@ export interface DebugDeps {
   /** High-level outside/inside toggle. */
   getView: () => 'exterior' | 'interior';
   toggleView: () => void;
-  /** Edit-mode controls — pick a hero, get a translate/rotate/scale gizmo. */
-  heroIds: string[];
+  /** Edit-mode controls — pick a hero, get a translate/rotate/scale gizmo.
+   *  Object-keyed: display label (e.g. "hero_speaker (past)") → bare hero id. */
+  heroIds: Record<string, string>;
   setEditTarget: (heroId: string) => void;
   setTransformMode: (mode: 'translate' | 'rotate' | 'scale') => void;
   /** So the panel can mirror W/E/R keyboard shortcuts. */
@@ -41,7 +42,14 @@ export interface DebugDeps {
 
 type Controller = ReturnType<GUI['add']>;
 
-export function createDebugPanel(deps: DebugDeps): GUI {
+export type DebugPanel = GUI & {
+  /** Rebuild the edit-hero dropdown options. Called after the hero state
+   *  panel changes a tag — labels include the state suffix, so they go
+   *  stale on retag. */
+  refreshHeroDropdown(newMap: Record<string, string>): void;
+};
+
+export function createDebugPanel(deps: DebugDeps): DebugPanel {
   const gui = new GUI({ title: 'LEC dev panel' });
 
   // Top-level: view toggle is the primary nav action, kept loose at the
@@ -126,18 +134,22 @@ export function createDebugPanel(deps: DebugDeps): GUI {
     mode: 'translate' as 'translate' | 'rotate' | 'scale',
     save: () => deps.saveHeroPositions(),
   };
-  const editTargetCtrl = editFolder.add(editProxy, 'target', deps.heroIds)
+  // editTargetCtrl is reassigned by refreshHeroDropdown when state tags
+  // change — destroying and re-adding is the only lil-gui pattern for
+  // updating option lists.
+  let editTargetCtrl = editFolder.add(editProxy, 'target', deps.heroIds)
     .name('edit hero')
-    .onChange((v: string) => {
-      // Picking a hero clears any shaft-handle selection — only one gizmo
-      // target at a time, otherwise the panel becomes a liar.
-      if (v !== '(none)' && atmosProxy.shaftHandle !== '(none)') {
-        atmosProxy.shaftHandle = '(none)';
-        shaftHandleCtrl.updateDisplay();
-        deps.setShaftEditTarget('(none)');
-      }
-      deps.setEditTarget(v);
-    });
+    .onChange(onEditTargetChanged);
+  function onEditTargetChanged(v: string): void {
+    // Picking a hero clears any shaft-handle selection — only one gizmo
+    // target at a time, otherwise the panel becomes a liar.
+    if (v !== '(none)' && atmosProxy.shaftHandle !== '(none)') {
+      atmosProxy.shaftHandle = '(none)';
+      shaftHandleCtrl.updateDisplay();
+      deps.setShaftEditTarget('(none)');
+    }
+    deps.setEditTarget(v);
+  }
   editFolder.add(editProxy, 'mode', ['translate', 'rotate', 'scale'])
     .name('mode (W/E/R)')
     .onChange((v: 'translate' | 'rotate' | 'scale') => deps.setTransformMode(v))
@@ -249,5 +261,22 @@ export function createDebugPanel(deps: DebugDeps): GUI {
     }
   }, 100);
 
-  return gui;
+  // Public surface beyond the GUI itself: a way to update the edit-hero
+  // dropdown options when the hero state panel retags something. lil-gui
+  // doesn't reconfigure option lists in place, so we destroy + recreate.
+  const refreshHeroDropdown = (newMap: Record<string, string>): void => {
+    const previousValue = editProxy.target;
+    editTargetCtrl.destroy();
+    editTargetCtrl = editFolder.add(editProxy, 'target', newMap)
+      .name('edit hero')
+      .onChange(onEditTargetChanged);
+    // Preserve the user's current selection across the rebuild, but only
+    // if it still appears in the new option list (state retag never
+    // changes the underlying ids, so this is essentially always safe).
+    if (Object.values(newMap).includes(previousValue)) {
+      editTargetCtrl.setValue(previousValue);
+    }
+  };
+
+  return Object.assign(gui, { refreshHeroDropdown });
 }
