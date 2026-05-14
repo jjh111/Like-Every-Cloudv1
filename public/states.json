@@ -1,0 +1,10 @@
+{
+  "past": {
+    "ambient": "test_music_1",
+    "ambientVolume": 0.6
+  },
+  "present": {
+    "ambient": "test_music_5",
+    "ambientVolume": 0.5
+  }
+}

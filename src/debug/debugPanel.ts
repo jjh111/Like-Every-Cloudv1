@@ -41,6 +41,14 @@ export interface DebugDeps {
   setCameraHandleEditTarget: (id: '(none)' | 'exterior' | 'doorway') => void;
   /** Live tunables for the wall-cull clipping plane. Panel binds directly. */
   cullSettings: { offset: number; enabled: boolean };
+  /** Camera bookmarks — live map, panel reads it directly on rebuild. */
+  bookmarks: Record<string, { position: [number, number, number]; target: [number, number, number] }>;
+  /** Tween the camera to a named bookmark. */
+  goToBookmark: (name: string) => void;
+  /** Snapshot current pose under a new bookmark name + persist. */
+  saveCurrentAsBookmark: (name: string) => void;
+  /** Remove a bookmark by name + persist. */
+  deleteBookmark: (name: string) => void;
 }
 
 type Controller = ReturnType<GUI['add']>;
@@ -51,6 +59,8 @@ export type DebugPanel = GUI & {
    *  stale on retag. */
   refreshHeroDropdown(newMap: Record<string, string>): void;
 };
+
+const BOOKMARK_PLACEHOLDER = '(none)';
 
 export function createDebugPanel(deps: DebugDeps): DebugPanel {
   const gui = new GUI({ title: 'LEC dev panel' });
@@ -103,8 +113,31 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
   const cameraProxy = {
     camera: deps.initialCamera,
     handle: '(none)' as '(none)' | 'exterior' | 'doorway',
+    bookmark: BOOKMARK_PLACEHOLDER,
     saveExterior: () => deps.saveCameraPose(),
     saveDoorway: () => deps.saveCurrentAsDoorway(),
+    saveBookmark: () => {
+      const name = window.prompt('Bookmark name?');
+      if (!name) return;
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      deps.saveCurrentAsBookmark(trimmed);
+      // After save: re-build the dropdown so the new entry is selectable.
+      // Use a tiny delay so the save flow's await resolves first; the
+      // bookmarks map is mutated synchronously before the network call,
+      // so 0ms (microtask) is enough.
+      setTimeout(() => {
+        refreshBookmarks(trimmed);
+      }, 0);
+    },
+    deleteBookmark: () => {
+      const name = cameraProxy.bookmark;
+      if (name === BOOKMARK_PLACEHOLDER) return;
+      if (!window.confirm(`Delete bookmark "${name}"?`)) return;
+      deps.deleteBookmark(name);
+      cameraProxy.bookmark = BOOKMARK_PLACEHOLDER;
+      setTimeout(() => refreshBookmarks(BOOKMARK_PLACEHOLDER), 0);
+    },
   };
   cameraFolder.add(cameraProxy, 'camera', Object.keys(deps.cameras))
     .name('camera mode')
@@ -115,9 +148,6 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
     .listen();
   // Per-mode tunables get their own sub-folder so they sit visually next
   // to the camera-mode dropdown regardless of when they're added/removed.
-  // Without this, refreshCameraTunables would append fresh controllers to
-  // the END of the camera folder on every mode swap and push past the
-  // save buttons.
   const cameraTunablesFolder = cameraFolder.addFolder('tunables (active mode)');
   let cameraTunableControllers: Controller[] = [];
   function refreshCameraTunables() {
@@ -155,6 +185,39 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
       deps.setCameraHandleEditTarget(v);
     });
 
+  // Bookmarks: tween-to-pose dropdown. Picking a bookmark immediately fires
+  // goToBookmark, then the proxy resets to "(none)" so picking the same
+  // bookmark again re-fires onChange (lil-gui skips same-value changes).
+  let bookmarkCtrl: Controller = buildBookmarkController();
+  function buildBookmarkController(): Controller {
+    return cameraFolder.add(cameraProxy, 'bookmark', bookmarkOptions())
+      .name('go to bookmark')
+      .onChange((v: string) => {
+        if (v === BOOKMARK_PLACEHOLDER) return;
+        deps.goToBookmark(v);
+        // Defer the reset to after the current change handler so lil-gui
+        // doesn't see a recursive setValue mid-event.
+        setTimeout(() => {
+          cameraProxy.bookmark = BOOKMARK_PLACEHOLDER;
+          bookmarkCtrl.updateDisplay();
+        }, 0);
+      });
+  }
+  function bookmarkOptions(): Record<string, string> {
+    const out: Record<string, string> = { [BOOKMARK_PLACEHOLDER]: BOOKMARK_PLACEHOLDER };
+    for (const name of Object.keys(deps.bookmarks).sort()) {
+      out[name] = name;
+    }
+    return out;
+  }
+  function refreshBookmarks(select: string) {
+    bookmarkCtrl.destroy();
+    cameraProxy.bookmark = select;
+    bookmarkCtrl = buildBookmarkController();
+  }
+  cameraFolder.add(cameraProxy, 'saveBookmark').name('save bookmark…');
+  cameraFolder.add(cameraProxy, 'deleteBookmark').name('delete current bookmark');
+
   // Wall-cull controls. `offset` pushes the clip plane deeper into the room
   // (positive = less wall cut, plane sits further from the camera).
   cameraFolder.add(deps.cullSettings, 'enabled')
@@ -165,9 +228,8 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
     .listen();
 
   // Save buttons at the bottom — these commit *everything* in this folder
-  // (exterior pose, doorway, AABB, cull settings, per-mode tunables) to
-  // positions.json. Keeping them last so they're the obvious "done"
-  // button after a session of tuning above.
+  // (exterior pose, doorway, AABB, cull settings, per-mode tunables,
+  // bookmarks) to positions.json.
   cameraFolder.add(cameraProxy, 'saveDoorway').name('save current as doorway');
   cameraFolder.add(cameraProxy, 'saveExterior').name('save → positions.json (all)');
 

@@ -37,10 +37,12 @@ The outside ↔ inside transition is animated by a `TweenCameraMode` that lerps 
 Folder-grouped, with a primary view-toggle button at the very top:
 
 - **state** — `target` (past / present), `progress` scrub, `duration`, snap / animate buttons, transition strategy dropdown
-- **camera** — mode dropdown (`freeform` / `interior-walk` / `interior-orbit`), `save → positions.json`, mode-specific tunables
-- **edit** — `edit hero` dropdown (translate / rotate / scale gizmo, **W / E / R** shortcuts), `save → manifest.json`
+- **camera** — mode dropdown (`freeform` / `interior-walk` / `interior-orbit`), mode-specific tunables, **bookmarks** (`go to bookmark` dropdown + `save bookmark…` + `delete current bookmark`), `edit handle` (exterior pose / doorway markers), wall-cull on / offset, `save current as doorway`, `save → positions.json (all)`
+- **edit** — `edit hero` dropdown (compound translate + rotate gizmo, **W / E / R** shortcuts, **⌘Z / ⌃Z** to undo a drag), `save → manifest.json`
 - **atmosphere** — preset (`morning-shaft` / `none`), shaft intensity / fog density / dust opacity / dust size / dust count sliders, per-shaft radius sliders, `edit shaft` handle gizmo, `save → morning-shaft.json`
 - **audio** — mute, master vol, per-channel vols (ambient / music / narration / sfx)
+
+In-scene helpers: hover any interactive object to see a small chip with its `hero_id`. Click a track chip in the bottom tracks bar to audition it on the `sfx` channel.
 
 ## Persisted state
 
@@ -50,7 +52,8 @@ Three JSON files capture everything you tune live. All three round-trip via dev-
 |---|---|---|
 | [`public/heroes/manifest.json`](public/heroes/manifest.json) | `POST /__lec/save-manifest` | Hero entries + per-state placements |
 | [`public/atmosphere/morning-shaft.json`](public/atmosphere/morning-shaft.json) | `POST /__lec/save-atmosphere` | Shaft endpoints + radii + atmosphere tunables |
-| [`public/camera/positions.json`](public/camera/positions.json) | `POST /__lec/save-camera` | Exterior pose + per-camera-mode tunables |
+| [`public/camera/positions.json`](public/camera/positions.json) | `POST /__lec/save-camera` | Exterior pose + doorway + AABB + cull + per-mode tunables + bookmarks |
+| [`public/states.json`](public/states.json) | _(read-only)_ | Per-state ambient music id + volume |
 
 ### Hero manifest schema
 
@@ -108,11 +111,25 @@ Heroes with **more than one placement** (e.g. the four cassettes) get wrapped in
     "freeform": { "damping": 0.05, "rotateSpeed": 1, "zoomSpeed": 1 },
     "interior-walk": { "t": 0, "speed": 0.0006, "smoothing": 0.1 },
     "interior-orbit": { "t": 0, "speed": 0.0006, "smoothing": 0.1 }
+  },
+  "bookmarks": {
+    "back-corner": { "position": [-1.8, 1.2, -1.6], "target": [-0.4, 1.0, 0.5] }
   }
 }
 ```
 
-The exterior pose is applied to the camera before the first frame renders. `doorway` is the waypoint the entry/exit tween curves through. `interiorAABB` defines the inside of the building for the wall-cull system. `cull` carries the runtime cull tunables. Each named camera mode's `tunables` are restored from `tunables[modeName]` (matched against `getTunables()` keys), so OrbitControls damping / rails wheel speed / saved scrub-position all survive a refresh.
+The exterior pose is applied to the camera before the first frame renders. `doorway` is the waypoint the entry/exit tween curves through. `interiorAABB` defines the inside of the building for the wall-cull system. `cull` carries the runtime cull tunables. Each named camera mode's `tunables` are restored from `tunables[modeName]` (matched against `getTunables()` keys), so OrbitControls damping / rails wheel speed / saved scrub-position all survive a refresh. The optional `bookmarks` map carries named camera poses surfaced in the dev panel as `go to bookmark`; the tween auto-routes through the doorway when a bookmark crosses the interior wall.
+
+### State config schema
+
+```json
+{
+  "past":    { "ambient": "test_music_1", "ambientVolume": 0.6 },
+  "present": { "ambient": "test_music_5", "ambientVolume": 0.5 }
+}
+```
+
+Per-state ambient music is data-driven. On startup [`src/state/stateConfig.ts`](src/state/stateConfig.ts) loads `public/states.json` and synthesizes `stateEnter` rules (one per state with an `ambient`) that play on the `music` channel, spatialized to `hero_speaker`. To change the music a state plays, edit the file — no code change required.
 
 See [Camera & view state](#camera--view-state) below for the full state machine.
 
@@ -215,8 +232,10 @@ When in interior view AND active mode is `freeform` AND camera is outside `inter
 | Interior AABB | positions.json `interiorAABB` | `save → positions.json (all)` |
 | Wall-cull offset + enabled | positions.json `cull` | `save → positions.json (all)` |
 | Per-mode tunables | positions.json `tunables[modeName]` | `save → positions.json (all)` |
+| Camera bookmarks | positions.json `bookmarks[name]` | `save bookmark…` / `delete current bookmark` |
 | Hero placements + state tags | heroes/manifest.json | `save → manifest.json` |
 | Atmosphere shafts + tunables | atmosphere/morning-shaft.json | `save → morning-shaft.json` |
+| Per-state ambient music | states.json | hand-edited (no save UI) |
 | Audio master + channel volumes | `sessionStorage` (per-tab) | every slider edit |
 
 Everything else (selected hero/handle, current view, current state target, transition progress) is session-only.
@@ -236,22 +255,26 @@ public/
   audio/
     test_music_*.{mp3,m4a}    placeholder tracks
   camera/
-    positions.json            exterior pose + per-mode tunables
+    positions.json            exterior pose + per-mode tunables + bookmarks
   heroes/
     manifest.json             hero entries + placements
     hero_*.glb                exported heroes (gitignored)
   scene/
     shared.glb                Blender scene export (gitignored)
+  states.json                 per-state ambient music + volume
 src/
-  app.ts                      top-level wiring, save handlers, HUD pills
+  app.ts                      top-level wiring + the tick loop
   main.ts                     entry
-  state/                      past/present controller
+  state/                      past/present controller + states.json loader
   transitions/                OpacityCrossfade, InstantSwap
   camera/                     FreeformMode, RailsMode, TweenCameraMode
-  scene/                      scene graph, tagging helpers
+  scene/                      scene graph, tagging, wallCull, cameraHandles, gizmoUndo
   loaders/                    GLBLoader (Draco), HeroLoader (multi-placement → Group)
   interaction/                pointer raycaster, engine, rules, actions
   audio/                      Web Audio wrapper, asset manifest
+  persist/                    saveFlows (custom JSON formatters + middleware POSTs)
+  ui/                         audioControls, tracksBar, heroStatePanel, hoverLabel
+  debug/                      debugPanel (lil-gui)
   atmosphere/                 MorningShaft, NoAtmosphere, Atmosphere interface
   debug/                      lil-gui dev panel
 scripts/
