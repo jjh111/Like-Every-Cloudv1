@@ -8,6 +8,7 @@
     "min": [-2.75, -0.5, -3.2],
     "max": [1, 3.5, 2.5]
   },
+  "cull": { "offset": 0.8, "enabled": true },
   "tunables": {
     "freeform": { "damping": 0.05, "rotateSpeed": 1, "zoomSpeed": 1 },
     "interior-walk": { "t": 0, "speed": 0.0006, "smoothing": 0.1 },

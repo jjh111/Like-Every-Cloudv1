@@ -39,6 +39,8 @@ export interface DebugDeps {
   saveCurrentAsDoorway: () => void;
   /** Attach the gizmo to one of the camera handles (exterior pose / doorway). */
   setCameraHandleEditTarget: (id: '(none)' | 'exterior' | 'doorway') => void;
+  /** Live tunables for the wall-cull clipping plane. Panel binds directly. */
+  cullSettings: { offset: number; enabled: boolean };
 }
 
 type Controller = ReturnType<GUI['add']>;
@@ -95,7 +97,6 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
   stateFolder.add(stateProxy, 'animateOther').name('animate to other');
   stateFolder.add(stateProxy, 'transition', Object.keys(deps.transitions))
     .onChange((v: string) => deps.setTransition(v));
-  stateFolder.close();
 
   // ── camera ─────────────────────────────────────────────────────────────
   const cameraFolder = gui.addFolder('camera');
@@ -134,6 +135,14 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
     });
   cameraFolder.add(cameraProxy, 'saveExterior').name('save → positions.json');
   cameraFolder.add(cameraProxy, 'saveDoorway').name('save current as doorway');
+  // Wall-cull controls. `offset` pushes the clip plane deeper into the room
+  // (positive = less wall cut, plane sits further from the camera).
+  cameraFolder.add(deps.cullSettings, 'enabled')
+    .name('wall cull on')
+    .listen();
+  cameraFolder.add(deps.cullSettings, 'offset', -1, 3, 0.05)
+    .name('cull offset (m)')
+    .listen();
   // Per-camera tunables get added below cameraProxy via refreshCameraTunables.
   let cameraTunableControllers: Controller[] = [];
   function refreshCameraTunables() {
@@ -149,7 +158,6 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
     }
   }
   refreshCameraTunables();
-  cameraFolder.close();
 
   // ── edit ───────────────────────────────────────────────────────────────
   const editFolder = gui.addFolder('edit');
@@ -266,7 +274,6 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
   audioFolder.add(audioProxy, 'sfx', 0, 1, 0.01)
     .name('sfx vol')
     .onChange((v: number) => deps.audio.setChannelVolume('sfx', v));
-  audioFolder.close();
 
   // Detect external changes (view toggle, programmatic camera swap, W/E/R
   // shortcuts, mute via the bottom-left pill) so the panel mirrors state

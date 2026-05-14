@@ -50,6 +50,11 @@ export async function start(container: HTMLElement): Promise<void> {
     new Vector3(-2.75, -0.5, -3.2),
     new Vector3(1.0, 3.5, 2.5),
   );
+  // Tunable clip-plane controls. `cullSettings.offset` pushes the plane
+  // inward (positive = deeper into the room, less wall cut) along the
+  // camera→room axis. `enabled` short-circuits clipping entirely without
+  // unwiring the per-material plane list.
+  const cullSettings = { offset: 0, enabled: true };
   // Per-camera-mode tunables (damping/rotateSpeed/zoomSpeed for freeform,
   // speed/smoothing for rails). Loaded from positions.json and applied to
   // each camera after construction.
@@ -61,6 +66,7 @@ export async function start(container: HTMLElement): Promise<void> {
         exterior?: { position?: number[]; target?: number[] };
         doorway?: number[];
         interiorAABB?: { min?: number[]; max?: number[] };
+        cull?: { offset?: number; enabled?: boolean };
         tunables?: Record<string, Record<string, number>>;
       };
       const p = data.exterior?.position;
@@ -74,6 +80,8 @@ export async function start(container: HTMLElement): Promise<void> {
       const aMax = data.interiorAABB?.max;
       if (Array.isArray(aMin) && aMin.length === 3) interiorAABB.min.set(aMin[0], aMin[1], aMin[2]);
       if (Array.isArray(aMax) && aMax.length === 3) interiorAABB.max.set(aMax[0], aMax[1], aMax[2]);
+      if (typeof data.cull?.offset === 'number') cullSettings.offset = data.cull.offset;
+      if (typeof data.cull?.enabled === 'boolean') cullSettings.enabled = data.cull.enabled;
       if (data.tunables) cameraTunablesFromDisk = data.tunables;
     }
   } catch (e) {
@@ -311,24 +319,30 @@ export async function start(container: HTMLElement): Promise<void> {
   const updateWallCull = (): void => {
     interiorAABB.getCenter(aabbCenter);
     interiorAABB.getSize(aabbHalf).multiplyScalar(0.5);
-    // Exterior view or camera still inside the room — leave the plane
-    // inert so nothing clips. Anything on the positive side of the plane
-    // renders; large `constant` pushes the plane far below everything.
-    if (view === 'exterior' || interiorAABB.containsPoint(camera.position)) {
+    // Disabled, exterior view, or camera still inside the room — leave the
+    // plane inert so nothing clips. Large `constant` pushes it below every
+    // possible fragment, so each one is on the positive side.
+    if (
+      !cullSettings.enabled ||
+      view === 'exterior' ||
+      interiorAABB.containsPoint(camera.position)
+    ) {
       clipPlane.normal.set(0, 1, 0);
       clipPlane.constant = 1e6;
       return;
     }
     // Camera is outside in interior view. Aim the plane perpendicular to
     // the camera→room-center vector, positioned at the AABB face closest
-    // to the camera. Anything camera-side of that plane is clipped.
+    // to the camera. `cullSettings.offset` pushes the plane further INTO
+    // the room (positive) or toward the camera (negative) — positive
+    // means LESS wall is cut.
     tmpNormal.subVectors(aabbCenter, camera.position).normalize();
     // AABB half-extent projected along the normal direction:
     const extent =
       Math.abs(aabbHalf.x * tmpNormal.x) +
       Math.abs(aabbHalf.y * tmpNormal.y) +
       Math.abs(aabbHalf.z * tmpNormal.z);
-    tmpPoint.copy(aabbCenter).addScaledVector(tmpNormal, -extent);
+    tmpPoint.copy(aabbCenter).addScaledVector(tmpNormal, -extent + cullSettings.offset);
     clipPlane.setFromNormalAndCoplanarPoint(tmpNormal, tmpPoint);
   };
 
@@ -765,6 +779,7 @@ export async function start(container: HTMLElement): Promise<void> {
     exterior: { position: [number, number, number]; target: [number, number, number] };
     doorway: [number, number, number];
     interiorAABB: { min: [number, number, number]; max: [number, number, number] };
+    cull: { offset: number; enabled: boolean };
     tunables: Record<string, Record<string, number>>;
   }): string => {
     const ex = data.exterior;
@@ -784,6 +799,7 @@ export async function start(container: HTMLElement): Promise<void> {
       `    "min": [${ai.min.join(', ')}],\n` +
       `    "max": [${ai.max.join(', ')}]\n` +
       '  },\n' +
+      `  "cull": { "offset": ${data.cull.offset}, "enabled": ${data.cull.enabled} },\n` +
       '  "tunables": {\n' +
       tunableLines.join(',\n') + '\n' +
       '  }\n' +
@@ -797,10 +813,12 @@ export async function start(container: HTMLElement): Promise<void> {
     for (const [name, cam] of Object.entries(cameras)) {
       tunables[name] = snapshotCameraTunables(cam);
     }
+    const r = (n: number) => Math.round(n * 1000) / 1000;
     return {
       exterior: pose,
       doorway: r3v(doorway),
       interiorAABB: { min: r3v(interiorAABB.min), max: r3v(interiorAABB.max) },
+      cull: { offset: r(cullSettings.offset), enabled: cullSettings.enabled },
       tunables,
     };
   };
@@ -909,6 +927,7 @@ export async function start(container: HTMLElement): Promise<void> {
     saveCameraPose,
     saveCurrentAsDoorway,
     setCameraHandleEditTarget,
+    cullSettings,
   });
 
   // Bottom-left audio controls: mute toggle + master volume. Volume slider
