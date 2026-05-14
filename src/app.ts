@@ -113,8 +113,16 @@ export async function start(container: HTMLElement): Promise<void> {
     }
     return t;
   };
+  // Late-bound: assigned once transformControls + morningShaft exist. Keeps
+  // setView callable from the dev panel without forcing a big reshuffle of
+  // the file. Initial no-op handles any pre-setup invocation (shouldn't
+  // happen in practice).
+  let detachGizmos: () => void = () => { /* set later */ };
   const setView = (v: 'exterior' | 'interior') => {
     view = v;
+    // Drop any active gizmo so the camera tween doesn't drag a visible
+    // helper through space and end up in a context where it's irrelevant.
+    detachGizmos();
     const fromPos = camera.position.clone();
     const fromTarget = currentTarget();
     const toPos = v === 'exterior' ? exteriorPos.clone() : interiorPath[0].clone();
@@ -226,16 +234,23 @@ export async function start(container: HTMLElement): Promise<void> {
     if (res.ok) {
       const data = (await res.json()) as {
         shafts?: Array<{ origin: number[]; aim: number[]; radius: number }>;
+        shaftIntensity?: number;
+        fogDensity?: number;
+        dustOpacity?: number;
+        dustSize?: number;
       };
+      morningShaftConfig = {};
       if (data.shafts && data.shafts.length) {
-        morningShaftConfig = {
-          shafts: data.shafts.map((s): ShaftDef => ({
-            origin: new Vector3(s.origin[0], s.origin[1], s.origin[2]),
-            aim: new Vector3(s.aim[0], s.aim[1], s.aim[2]),
-            radius: s.radius,
-          })),
-        };
+        morningShaftConfig.shafts = data.shafts.map((s): ShaftDef => ({
+          origin: new Vector3(s.origin[0], s.origin[1], s.origin[2]),
+          aim: new Vector3(s.aim[0], s.aim[1], s.aim[2]),
+          radius: s.radius,
+        }));
       }
+      if (typeof data.shaftIntensity === 'number') morningShaftConfig.shaftIntensity = data.shaftIntensity;
+      if (typeof data.fogDensity === 'number') morningShaftConfig.fogDensity = data.fogDensity;
+      if (typeof data.dustOpacity === 'number') morningShaftConfig.dustOpacity = data.dustOpacity;
+      if (typeof data.dustSize === 'number') morningShaftConfig.dustSize = data.dustSize;
     }
   } catch (e) {
     console.warn('[atmosphere] config load failed, using defaults', e);
@@ -487,6 +502,15 @@ export async function start(container: HTMLElement): Promise<void> {
     shaftHandleIds.push(`shaft ${i} origin`, `shaft ${i} aim`);
   }
 
+  // Now that TransformControls + MorningShaft both exist, wire the
+  // detach helper that setView calls before its camera tween.
+  detachGizmos = () => {
+    transformControls.detach();
+    transformHelper.visible = false;
+    transformControls.enabled = false;
+    morningShaft.setHandlesVisible(false);
+  };
+
   const setShaftEditTarget = (id: string) => {
     if (id === '(none)') {
       morningShaft.setHandlesVisible(false);
@@ -568,18 +592,26 @@ export async function start(container: HTMLElement): Promise<void> {
   };
 
   // Compact formatter to match the hand-curated layout of the existing
-  // atmosphere JSON — one shaft per line, primitives inline.
-  const formatShaftsManifest = (shafts: ReturnType<MorningShaft['getCurrentShafts']>): string => {
-    const lines = shafts.map((s) =>
+  // atmosphere JSON — one shaft per line, tunables on their own lines.
+  const formatAtmosphereConfig = (cfg: ReturnType<MorningShaft['getCurrentConfig']>): string => {
+    const shaftLines = cfg.shafts.map((s) =>
       `    { "origin": [${s.origin.join(', ')}], "aim": [${s.aim.join(', ')}], "radius": ${s.radius} }`,
     );
-    return '{\n  "shafts": [\n' + lines.join(',\n') + '\n  ]\n}\n';
+    return (
+      '{\n' +
+      '  "shafts": [\n' + shaftLines.join(',\n') + '\n  ],\n' +
+      `  "shaftIntensity": ${cfg.shaftIntensity},\n` +
+      `  "fogDensity": ${cfg.fogDensity},\n` +
+      `  "dustOpacity": ${cfg.dustOpacity},\n` +
+      `  "dustSize": ${cfg.dustSize}\n` +
+      '}\n'
+    );
   };
 
   const saveShaftConfig = async () => {
     try {
-      const shafts = morningShaft.getCurrentShafts();
-      const body = formatShaftsManifest(shafts);
+      const config = morningShaft.getCurrentConfig();
+      const body = formatAtmosphereConfig(config);
       const res = await fetch('/__lec/save-atmosphere', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -590,7 +622,7 @@ export async function start(container: HTMLElement): Promise<void> {
         throw new Error(`save responded ${res.status}: ${msg}`);
       }
       const result = (await res.json()) as { saved?: string };
-      console.log('[atmosphere] saved →', result.saved);
+      console.log('[atmosphere] saved →', result.saved, config);
     } catch (e) {
       console.warn('[atmosphere] save failed', e);
     }

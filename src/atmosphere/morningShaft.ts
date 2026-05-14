@@ -100,6 +100,11 @@ export interface MorningShaftConfig {
   dustCount?: number;
   dustBoundsMin?: Vector3;
   dustBoundsMax?: Vector3;
+  /** Live tunables. Saved alongside shafts so panel adjustments survive refresh. */
+  shaftIntensity?: number;
+  fogDensity?: number;
+  dustOpacity?: number;
+  dustSize?: number;
 }
 
 export class MorningShaft implements Atmosphere {
@@ -142,6 +147,10 @@ export class MorningShaft implements Atmosphere {
     this.dustCount = config?.dustCount ?? 800;
     this.dustMin = config?.dustBoundsMin ?? new Vector3(-2.7, -0.4, -2.5);
     this.dustMax = config?.dustBoundsMax ?? new Vector3(1.6, 2.6, 1.6);
+    if (typeof config?.shaftIntensity === 'number') this.shaftIntensity = config.shaftIntensity;
+    if (typeof config?.fogDensity === 'number') this.fogDensity = config.fogDensity;
+    if (typeof config?.dustOpacity === 'number') this.dustOpacity = config.dustOpacity;
+    if (typeof config?.dustSize === 'number') this.dustSize = config.dustSize;
   }
 
   init(ctx: AtmosphereContext): void {
@@ -373,6 +382,24 @@ export class MorningShaft implements Atmosphere {
       aim: [r3(s.aim.x), r3(s.aim.y), r3(s.aim.z)],
       radius: r3(s.radius),
     }));
+  }
+
+  /** Full serializable config — shafts plus every panel-editable tunable. */
+  getCurrentConfig(): {
+    shafts: ReturnType<MorningShaft['getCurrentShafts']>;
+    shaftIntensity: number;
+    fogDensity: number;
+    dustOpacity: number;
+    dustSize: number;
+  } {
+    const r3 = (n: number) => Math.round(n * 1000) / 1000;
+    return {
+      shafts: this.getCurrentShafts(),
+      shaftIntensity: r3(this.shaftIntensity),
+      fogDensity: r3(this.fogDensity),
+      dustOpacity: r3(this.dustOpacity),
+      dustSize: r3(this.dustSize),
+    };
   }
 
   /** How many shafts are currently configured. */
