@@ -1,6 +1,6 @@
 import { defineConfig, type Plugin } from 'vite';
-import { writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 
 // Dev-only middleware. Lets the in-browser edit gizmo persist hero
 // placements back to public/heroes/manifest.json — the source of truth
@@ -52,9 +52,52 @@ function manifestWriter(): Plugin {
   };
 }
 
+// Same shape as manifestWriter but writes the morning-shaft atmosphere config.
+// Kept as a separate route + path so the safety boundary is explicit per file.
+function atmosphereWriter(): Plugin {
+  return {
+    name: 'lec-atmosphere-writer',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use('/__lec/save-atmosphere', (req, res, next) => {
+        if (req.method !== 'POST') {
+          next();
+          return;
+        }
+        let body = '';
+        req.on('data', (chunk: Buffer) => { body += chunk.toString('utf8'); });
+        req.on('end', () => {
+          try {
+            const parsed = JSON.parse(body) as { shafts?: unknown };
+            if (!parsed || !Array.isArray(parsed.shafts)) {
+              res.statusCode = 400;
+              res.end('expected { shafts: [...] }');
+              return;
+            }
+            const out = resolve(process.cwd(), 'public/atmosphere/morning-shaft.json');
+            mkdirSync(dirname(out), { recursive: true });
+            const trailingNewline = body.endsWith('\n') ? '' : '\n';
+            writeFileSync(out, body + trailingNewline);
+            res.statusCode = 200;
+            res.setHeader('content-type', 'application/json');
+            res.end(JSON.stringify({ saved: out }));
+          } catch (e) {
+            res.statusCode = 400;
+            res.end(String(e));
+          }
+        });
+        req.on('error', () => {
+          res.statusCode = 500;
+          res.end('stream error');
+        });
+      });
+    },
+  };
+}
+
 export default defineConfig({
   publicDir: 'public',
-  plugins: [manifestWriter()],
+  plugins: [manifestWriter(), atmosphereWriter()],
   server: {
     port: 5173,
     open: false,

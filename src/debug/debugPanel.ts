@@ -35,6 +35,8 @@ export interface DebugDeps {
   shaftHandleIds: string[];
   setShaftEditTarget: (id: string) => void;
   logShaftConfig: () => void;
+  /** Persist shaft endpoints/radii back to morning-shaft.json. */
+  saveShaftConfig: () => void;
 }
 
 type Controller = ReturnType<GUI['add']>;
@@ -146,6 +148,7 @@ export function createDebugPanel(deps: DebugDeps): GUI {
     atmosphere: deps.initialAtmosphere,
     shaftHandle: '(none)',
     logShafts: () => deps.logShaftConfig(),
+    saveShafts: () => deps.saveShaftConfig(),
   };
   atmosFolder.add(atmosProxy, 'atmosphere', Object.keys(deps.atmospheres))
     .name('preset')
@@ -188,6 +191,7 @@ export function createDebugPanel(deps: DebugDeps): GUI {
       deps.setShaftEditTarget(v);
     });
   atmosFolder.add(atmosProxy, 'logShafts').name('log shaft config');
+  atmosFolder.add(atmosProxy, 'saveShafts').name('save → morning-shaft.json');
 
   // ── audio ──────────────────────────────────────────────────────────────
   const audioFolder = gui.addFolder('audio');

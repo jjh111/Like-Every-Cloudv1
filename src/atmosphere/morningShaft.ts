@@ -335,16 +335,44 @@ export class MorningShaft implements Atmosphere {
     this.originalFog = null;
   }
 
+  // Per-shaft radius surfaced as accessors so the dev panel can bind a
+  // slider directly to it. Adding setShaftRadius() on a single index keeps
+  // the cone geometry in sync without an explicit refresh call.
+  get shaft0Radius(): number { return this.shafts[0]?.radius ?? 0; }
+  set shaft0Radius(v: number) { if (this.shafts[0]) this.setShaftRadius(0, v); }
+  get shaft1Radius(): number { return this.shafts[1]?.radius ?? 0; }
+  set shaft1Radius(v: number) { if (this.shafts[1]) this.setShaftRadius(1, v); }
+
   getTunables(): AtmosphereTunables {
-    return {
-      target: this,
-      specs: [
-        { key: 'shaftIntensity', label: 'shaft intensity', min: 0, max: 1.5, step: 0.01 },
-        { key: 'fogDensity', label: 'fog density', min: 0, max: 0.08, step: 0.001 },
-        { key: 'dustOpacity', label: 'dust opacity', min: 0, max: 1, step: 0.01 },
-        { key: 'dustSize', label: 'dust size', min: 0.005, max: 0.2, step: 0.005 },
-      ],
-    };
+    const specs: AtmosphereTunables['specs'] = [
+      { key: 'shaftIntensity', label: 'shaft intensity', min: 0, max: 1.5, step: 0.01 },
+      { key: 'fogDensity', label: 'fog density', min: 0, max: 0.08, step: 0.001 },
+      { key: 'dustOpacity', label: 'dust opacity', min: 0, max: 1, step: 0.01 },
+      { key: 'dustSize', label: 'dust size', min: 0.005, max: 0.2, step: 0.005 },
+    ];
+    // Only surface a per-shaft radius slider for shafts that actually exist
+    // so a config with fewer shafts (or NoAtmosphere) doesn't show dead knobs.
+    if (this.shafts.length >= 1) {
+      specs.push({ key: 'shaft0Radius', label: 'shaft 0 radius', min: 0.1, max: 3, step: 0.01 });
+    }
+    if (this.shafts.length >= 2) {
+      specs.push({ key: 'shaft1Radius', label: 'shaft 1 radius', min: 0.1, max: 3, step: 0.01 });
+    }
+    return { target: this, specs };
+  }
+
+  /** JSON-serializable snapshot for save → morning-shaft.json. */
+  getCurrentShafts(): Array<{
+    origin: [number, number, number];
+    aim: [number, number, number];
+    radius: number;
+  }> {
+    const r3 = (n: number) => Math.round(n * 1000) / 1000;
+    return this.shafts.map((s) => ({
+      origin: [r3(s.origin.x), r3(s.origin.y), r3(s.origin.z)],
+      aim: [r3(s.aim.x), r3(s.aim.y), r3(s.aim.z)],
+      radius: r3(s.radius),
+    }));
   }
 
   /** How many shafts are currently configured. */

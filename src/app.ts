@@ -20,7 +20,7 @@ import { getHeroId } from './scene/tagging';
 import { createDebugPanel } from './debug/debugPanel';
 import type { Atmosphere } from './atmosphere/atmosphere';
 import { NoAtmosphere } from './atmosphere/atmosphere';
-import { MorningShaft } from './atmosphere/morningShaft';
+import { MorningShaft, type MorningShaftConfig, type ShaftDef } from './atmosphere/morningShaft';
 
 export async function start(container: HTMLElement): Promise<void> {
   const scene = createScene();
@@ -171,9 +171,34 @@ export async function start(container: HTMLElement): Promise<void> {
 
   // Atmosphere — pluggable like transitions/cameras. Owns the scene's fog
   // (swaps to FogExp2 + restores on dispose) plus any dust / shaft meshes.
+  // Shaft positions/radii live in public/atmosphere/morning-shaft.json; on
+  // startup we fetch and pass them in so the user's last-saved values
+  // survive a refresh. If the file is missing, MorningShaft falls back to
+  // its hardcoded defaults.
+  let morningShaftConfig: MorningShaftConfig | undefined;
+  try {
+    const res = await fetch('/atmosphere/morning-shaft.json', { cache: 'no-store' });
+    if (res.ok) {
+      const data = (await res.json()) as {
+        shafts?: Array<{ origin: number[]; aim: number[]; radius: number }>;
+      };
+      if (data.shafts && data.shafts.length) {
+        morningShaftConfig = {
+          shafts: data.shafts.map((s): ShaftDef => ({
+            origin: new Vector3(s.origin[0], s.origin[1], s.origin[2]),
+            aim: new Vector3(s.aim[0], s.aim[1], s.aim[2]),
+            radius: s.radius,
+          })),
+        };
+      }
+    }
+  } catch (e) {
+    console.warn('[atmosphere] config load failed, using defaults', e);
+  }
+
   const atmosphereCtx = { scene, camera };
   const atmospheres: Record<string, Atmosphere> = {
-    'morning-shaft': new MorningShaft(),
+    'morning-shaft': new MorningShaft(morningShaftConfig),
     'none': new NoAtmosphere(),
   };
   const initialAtmosphereName = 'morning-shaft';
@@ -451,6 +476,35 @@ export async function start(container: HTMLElement): Promise<void> {
 
   const logShaftConfig = () => morningShaft.logShaftConfig();
 
+  // Compact formatter to match the hand-curated layout of the existing
+  // atmosphere JSON — one shaft per line, primitives inline.
+  const formatShaftsManifest = (shafts: ReturnType<MorningShaft['getCurrentShafts']>): string => {
+    const lines = shafts.map((s) =>
+      `    { "origin": [${s.origin.join(', ')}], "aim": [${s.aim.join(', ')}], "radius": ${s.radius} }`,
+    );
+    return '{\n  "shafts": [\n' + lines.join(',\n') + '\n  ]\n}\n';
+  };
+
+  const saveShaftConfig = async () => {
+    try {
+      const shafts = morningShaft.getCurrentShafts();
+      const body = formatShaftsManifest(shafts);
+      const res = await fetch('/__lec/save-atmosphere', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      });
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(`save responded ${res.status}: ${msg}`);
+      }
+      const result = (await res.json()) as { saved?: string };
+      console.log('[atmosphere] saved →', result.saved);
+    } catch (e) {
+      console.warn('[atmosphere] save failed', e);
+    }
+  };
+
   const logHeroPositions = () => {
     // manifest.json takes radians for rotation, so the JSON is paste-ready.
     // The degrees readout that follows is purely for eyeballing.
@@ -512,6 +566,7 @@ export async function start(container: HTMLElement): Promise<void> {
     shaftHandleIds,
     setShaftEditTarget,
     logShaftConfig,
+    saveShaftConfig,
   });
 
   // Bottom-left audio controls: mute toggle + master volume. Volume slider
