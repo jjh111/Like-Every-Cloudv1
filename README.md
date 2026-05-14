@@ -98,6 +98,12 @@ Heroes with **more than one placement** (e.g. the four cassettes) get wrapped in
     "position": [5.94, 1.32, -1.56],
     "target": [2, 1.5, -1.6]
   },
+  "doorway": [0.5, 1.3, 2.0],
+  "interiorAABB": {
+    "min": [-2.75, -0.5, -3.2],
+    "max": [1, 3.5, 2.5]
+  },
+  "cull": { "offset": 0, "enabled": true },
   "tunables": {
     "freeform": { "damping": 0.05, "rotateSpeed": 1, "zoomSpeed": 1 },
     "interior-walk": { "t": 0, "speed": 0.0006, "smoothing": 0.1 },
@@ -106,7 +112,9 @@ Heroes with **more than one placement** (e.g. the four cassettes) get wrapped in
 }
 ```
 
-The exterior pose is applied to the camera before the first frame renders. Each named camera mode's tunables are restored from `tunables[modeName]` (matched against `getTunables()` keys), so OrbitControls damping / rails wheel speed / saved scrub-position all survive a refresh.
+The exterior pose is applied to the camera before the first frame renders. `doorway` is the waypoint the entry/exit tween curves through. `interiorAABB` defines the inside of the building for the wall-cull system. `cull` carries the runtime cull tunables. Each named camera mode's `tunables` are restored from `tunables[modeName]` (matched against `getTunables()` keys), so OrbitControls damping / rails wheel speed / saved scrub-position all survive a refresh.
+
+See [Camera & view state](#camera--view-state) below for the full state machine.
 
 ## Architecture
 
@@ -148,6 +156,76 @@ The `at` field for spatialization can be a fixed `position`, a `heroId` to resol
 - `exclusive: true` on a play call fades out other tracks on the same channel — that's how cassette clicks swap cleanly
 - `at` enables HRTF spatialization with `panningModel: 'HRTF'`, `distanceModel: 'inverse'`, `refDistance: 2`, `rolloffFactor: 1`. Listener tracks the camera each frame via `syncSpatial(camera)`
 - Master gain boots at 0 (muted). `setMuted(false)` restores the preferred level; volumes persist in `sessionStorage` (channels too). The muted flag itself does **not** persist — every page load starts muted, by design
+
+### Camera & view state
+
+Two layers sit on top of each other: a high-level **view** (outside vs inside) and a lower-level **camera mode** (how the camera is currently being driven). The view drives which mode gets installed; the mode owns frame-to-frame motion.
+
+#### View states
+
+| View | Default mode | Animated entry destination |
+|---|---|---|
+| **exterior** | `freeform` | `exteriorPos` → `exteriorTarget` |
+| **interior** | `interior-orbit` | `interiorPath[0]` → `interiorCenter` |
+
+`getView()` returns the current, `setView(v)` triggers a transition. Not persisted — every page load opens at `exterior`.
+
+#### Camera modes
+
+Four implementations of `CameraMode` (`init / update / dispose / getTunables`):
+
+| Mode | Class | Behavior | Persisted tunables |
+|---|---|---|---|
+| `freeform` | `FreeformMode` | OrbitControls — mouse-drag = orbit, right-drag = pan, wheel = zoom. Pivot is `exteriorTarget` by default; `setEditTarget` overrides it with a point on the camera's forward ray so the view doesn't jump when you start editing. | `damping`, `rotateSpeed`, `zoomSpeed` |
+| `interior-walk` | `RailsMode` | Closed Catmull-Rom curve through `interiorPath`. Wheel scrolls along the curve via `targetT`, damped by `smoothing`. Look-at follows the next path point ("ahead"). | `t`, `speed`, `smoothing` |
+| `interior-orbit` | `RailsMode` | Same path as walk, but look-at locked to `interiorCenter`. Feels like an orbit. | `t`, `speed`, `smoothing` |
+| `(transient)` | `TweenCameraMode` | Smootherstep lerp between two poses, optionally via a `doorway` waypoint (CatmullRom over 3 points). Hands off to a destination mode via `onComplete`. Lives only during the entry/exit animation. | — |
+
+#### Transition flow
+
+| User action | What runs |
+|---|---|
+| Click **`go inside →`** / **`← go outside`** | `setView(target)` snapshots current pose → if entering interior, resets both rails cameras' `t=0` → constructs a `TweenCameraMode` with `doorway` as waypoint → after `VIEW_TWEEN_DURATION` (1.6s), `setCamera(destName)` swaps in `freeform` (outside) or `interior-orbit` (inside) |
+| Pick a **camera mode** in the dropdown | `setCamera(name)` — disposes current, inits new. No tween. |
+| Pick a hero / shaft handle / camera handle | Auto-switches to `freeform`, keeps current camera transform, parks the orbit pivot on the forward ray at the gizmo target's depth |
+| In **freeform interior**, camera leaves `interiorAABB` | Wall-cull clip plane activates: perpendicular to camera→room-center at the AABB face closest to camera, offset by `cullSettings.offset`. Inert in every other view/mode. |
+
+#### Wall cull (clipping plane)
+
+When in interior view AND active mode is `freeform` AND camera is outside `interiorAABB`, a single `THREE.Plane` is repositioned each frame perpendicular to the camera→room-center vector, sitting at the AABB face closest to the camera plus the user-tunable `offset`. WebGL discards every fragment on the camera side of that plane via per-material `clippingPlanes`. The plane is attached to every photoscan material at boot; heroes are excluded so they never clip. Inert in every other state (entry/exit tween + rails + camera-inside-AABB + exterior view).
+
+#### Source vectors
+
+| Vector | Source | Used by |
+|---|---|---|
+| `exteriorPos` | positions.json `exterior.position` | tween destination (outside), boot-time `camera.position` |
+| `exteriorTarget` | positions.json `exterior.target` | freeform OrbitControls target, tween lookAt destination |
+| `doorway` | positions.json `doorway` | tween waypoint between exterior↔interior |
+| `interiorAABB` | positions.json `interiorAABB` | wall-cull boundary |
+| `cullSettings` | positions.json `cull` | clip-plane on/off + offset |
+| `interiorPath[0..5]` | hardcoded in [src/app.ts](src/app.ts) | RailsMode curve (shared by walk + orbit) |
+| `interiorCenter` | hardcoded in [src/app.ts](src/app.ts) | interior-orbit look-at |
+
+#### Persistence
+
+| What | Where | Saved by |
+|---|---|---|
+| Exterior pose | positions.json `exterior` | `save → positions.json (all)` |
+| Doorway waypoint | positions.json `doorway` | same, or `save current as doorway` |
+| Interior AABB | positions.json `interiorAABB` | `save → positions.json (all)` |
+| Wall-cull offset + enabled | positions.json `cull` | `save → positions.json (all)` |
+| Per-mode tunables | positions.json `tunables[modeName]` | `save → positions.json (all)` |
+| Hero placements + state tags | heroes/manifest.json | `save → manifest.json` |
+| Atmosphere shafts + tunables | atmosphere/morning-shaft.json | `save → morning-shaft.json` |
+| Audio master + channel volumes | `sessionStorage` (per-tab) | every slider edit |
+
+Everything else (selected hero/handle, current view, current state target, transition progress) is session-only.
+
+#### Gotchas worth knowing
+
+- **Rails `t` is persisted.** Scroll halfway around the interior loop and save, next session opens at that scrub point. The view-toggle resets `t=0` on entry so the rails picks up at the entrance regardless.
+- **The tween disposes the previous mode** before animating. Click "go inside" mid-tween and the in-flight tween is disposed; a new one starts from wherever the camera currently is.
+- **`OrbitControls` only exists during freeform.** `currentTarget()` falls back to a point on the forward ray for rails / tween modes when the tween needs a starting lookAt.
 
 ## Layout
 
