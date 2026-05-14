@@ -1,70 +1,69 @@
 {
   "heroes": [
     {
-      "id": "hero_speaker",
-      "url": "/heroes/hero_speaker.glb",
-      "interactive": true,
-      "placements": [
-        { "state": "present", "position": [-1.771, 0.76, 0.079] }
-      ]
-    },
-    {
       "id": "hero_boombox",
       "url": "/heroes/hero_boombox.glb",
       "interactive": true,
       "placements": [
-        { "state": "past", "position": [-0.844, 0.602, -1.118], "rotation": [-0.001, -1.058, 0] }
+        { "state": "past", "position": [-6.534, 0.672, -1.763], "rotation": [0, 0, 0] }
       ]
     },
     {
-      "id": "hero_amp",
-      "url": "/heroes/hero_amp.glb",
-      "interactive": true,
-      "placements": [
-        { "state": "past", "position": [-1.852, 0.1, -0.602], "rotation": [0, 1.19, 0] }
-      ]
-    },
-    {
-      "id": "hero_table",
-      "url": "/heroes/hero_table.glb",
-      "interactive": false,
-      "placements": [
-        { "state": "both", "position": [-0.333, 0.402, -1.03] }
-      ]
-    },
-    {
-      "id": "hero_monoblock_chair",
-      "url": "/heroes/hero_monoblock_chair.glb",
-      "interactive": false,
-      "placements": [
-        { "state": "both", "position": [-1.155, 0.162, -0.337], "rotation": [0, 0.832, 0] }
-      ]
-    },
-    {
-      "id": "hero_cassette",
-      "url": "/heroes/hero_cassette.glb",
+      "id": "hero_cassette_raw_a",
+      "url": "/heroes/hero_cassette_raw_a.glb",
       "interactive": true,
       "placements": [
         {
           "state": "past",
-          "position": [-0.7, 0.45, -1.03],
-          "userData": { "track_id": "test_music_2", "audio_source_hero_id": "hero_boombox" }
+          "position": [-6.73, 0.721, -1.53],
+          "rotation": [0, -0.038, 0],
+          "userData": { "pile_id": "table_main", "track_id": "test_music_5", "audio_source_hero_id": "hero_boombox" }
         },
         {
           "state": "past",
-          "position": [-0.4, 0.45, -1.03],
-          "userData": { "track_id": "test_music_3", "audio_source_hero_id": "hero_boombox" }
-        },
-        {
-          "state": "past",
-          "position": [-0.1, 0.45, -1.03],
-          "userData": { "track_id": "test_music_4", "audio_source_hero_id": "hero_boombox" }
-        },
-        {
-          "state": "past",
-          "position": [0.2, 0.45, -1.03],
-          "userData": { "track_id": "test_music_5", "audio_source_hero_id": "hero_boombox" }
+          "position": [-6.729, 0.733, -1.543],
+          "rotation": [0, -0.349, 0],
+          "userData": { "pile_id": "table_main", "track_id": "test_music_1", "audio_source_hero_id": "hero_boombox" }
         }
+      ]
+    },
+    {
+      "id": "hero_cassette_raw_b",
+      "url": "/heroes/hero_cassette_raw_b.glb",
+      "interactive": true,
+      "placements": [
+        {
+          "state": "past",
+          "position": [-6.72, 0.672, -1.544],
+          "rotation": [0, 0.225, 0],
+          "userData": { "pile_id": "table_main", "track_id": "test_music_1", "audio_source_hero_id": "hero_boombox" }
+        },
+        {
+          "state": "past",
+          "position": [-6.734, 0.684, -1.536],
+          "rotation": [0, -0.252, 0],
+          "userData": { "pile_id": "table_main", "track_id": "test_music_2", "audio_source_hero_id": "hero_boombox" }
+        },
+        {
+          "state": "past",
+          "position": [-6.729, 0.696, -1.542],
+          "rotation": [0, -0.325, 0],
+          "userData": { "pile_id": "table_main", "track_id": "test_music_3", "audio_source_hero_id": "hero_boombox" }
+        },
+        {
+          "state": "past",
+          "position": [-6.749, 0.709, -1.534],
+          "rotation": [0, 0.312, 0],
+          "userData": { "pile_id": "table_main", "track_id": "test_music_4", "audio_source_hero_id": "hero_boombox" }
+        }
+      ]
+    },
+    {
+      "id": "hero_cassette_case",
+      "url": "/heroes/hero_cassette_case.glb",
+      "interactive": false,
+      "placements": [
+        { "state": "past", "position": [-6.354, 0.672, -1.503], "rotation": [0, 0.262, 0] }
       ]
     }
   ]

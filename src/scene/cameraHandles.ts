@@ -1,10 +1,17 @@
-import { Mesh, MeshBasicMaterial, type Scene, SphereGeometry, type Vector3 } from 'three';
+import { Mesh, MeshBasicMaterial, type Scene, SphereGeometry, Vector3 } from 'three';
 
 // Colored sphere markers for the exterior camera pose + the doorway tween
 // waypoint. Hidden by default; the dev panel surfaces them as gizmo targets.
-// The marker's position vector is the source of truth — `syncToSources()`
-// every tick mirrors it back into the caller's Vector3s (exteriorPos, doorway)
-// so dragging the gizmo flows through the tween + save pipeline.
+//
+// Bidirectional sync: dragging the gizmo (marker → vector) and external
+// mutation of the vector (e.g. saveCurrentAsDoorway → vector → marker) both
+// flow through `syncToSources()`. We attribute direction by tracking each
+// marker's last-known position — if the marker moved since the last tick,
+// the gizmo is dragging it; otherwise any vector-vs-marker mismatch means
+// the vector was changed externally and the marker should follow.
+//
+// Without this, a save that mutates the doorway Vector3 lasts only one
+// tick before the marker (still at the old position) clobbers it back.
 export interface CameraHandles {
   exteriorMarker: Mesh;
   doorwayMarker: Mesh;
@@ -12,7 +19,7 @@ export interface CameraHandles {
   setVisible(id: '(none)' | 'exterior' | 'doorway'): void;
   /** Hide every marker. Used by the global detachGizmos in app.ts. */
   hideAll(): void;
-  /** Per-tick: copy marker.position back into the source vectors if changed. */
+  /** Per-tick: keep marker.position and the source vectors in sync. */
   syncToSources(): void;
 }
 
@@ -52,9 +59,26 @@ export function createCameraHandles(
     doorwayMarker.visible = false;
   };
 
+  // Last-seen marker positions for direction attribution. If the marker
+  // moved between ticks, the gizmo dragged it; if it didn't move but the
+  // vector differs, the vector was mutated externally.
+  const lastExteriorMarker = exteriorMarker.position.clone();
+  const lastDoorwayMarker = doorwayMarker.position.clone();
+
+  const syncPair = (marker: Mesh, vector: Vector3, lastMarker: Vector3): void => {
+    if (!marker.position.equals(lastMarker)) {
+      // Marker drag wins — push to vector.
+      vector.copy(marker.position);
+    } else if (!vector.equals(marker.position)) {
+      // External vector mutation (e.g. saveCurrentAsDoorway) — pull to marker.
+      marker.position.copy(vector);
+    }
+    lastMarker.copy(marker.position);
+  };
+
   const syncToSources = (): void => {
-    if (!exteriorPos.equals(exteriorMarker.position)) exteriorPos.copy(exteriorMarker.position);
-    if (!doorway.equals(doorwayMarker.position)) doorway.copy(doorwayMarker.position);
+    syncPair(exteriorMarker, exteriorPos, lastExteriorMarker);
+    syncPair(doorwayMarker, doorway, lastDoorwayMarker);
   };
 
   return { exteriorMarker, doorwayMarker, setVisible, hideAll, syncToSources };
