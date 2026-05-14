@@ -36,16 +36,22 @@ export async function start(container: HTMLElement): Promise<void> {
   // backup values if the file is missing or malformed.
   const exteriorPos = new Vector3(12, 5, 8);
   const exteriorTarget = new Vector3(2.0, 1.5, -1.6);
+  // Per-camera-mode tunables (damping/rotateSpeed/zoomSpeed for freeform,
+  // speed/smoothing for rails). Loaded from positions.json and applied to
+  // each camera after construction.
+  let cameraTunablesFromDisk: Record<string, Record<string, number>> | null = null;
   try {
     const camRes = await fetch('/camera/positions.json', { cache: 'no-store' });
     if (camRes.ok) {
       const data = (await camRes.json()) as {
         exterior?: { position?: number[]; target?: number[] };
+        tunables?: Record<string, Record<string, number>>;
       };
       const p = data.exterior?.position;
       const t = data.exterior?.target;
       if (Array.isArray(p) && p.length === 3) exteriorPos.set(p[0], p[1], p[2]);
       if (Array.isArray(t) && t.length === 3) exteriorTarget.set(t[0], t[1], t[2]);
+      if (data.tunables) cameraTunablesFromDisk = data.tunables;
     }
   } catch (e) {
     console.warn('[camera] positions.json load failed, using defaults', e);
@@ -81,6 +87,30 @@ export async function start(container: HTMLElement): Promise<void> {
       closed: true,
     }),
   };
+
+  // Apply any persisted tunables to each camera by name. Uses the mode's
+  // own getTunables() spec list to know which properties are valid.
+  const applyCameraTunables = (cam: CameraMode, values: Record<string, number>): void => {
+    const { target, specs } = cam.getTunables();
+    const t = target as Record<string, number>;
+    for (const s of specs) {
+      if (typeof values[s.key] === 'number') t[s.key] = values[s.key];
+    }
+  };
+  const snapshotCameraTunables = (cam: CameraMode): Record<string, number> => {
+    const { target, specs } = cam.getTunables();
+    const t = target as Record<string, number>;
+    const out: Record<string, number> = {};
+    for (const s of specs) out[s.key] = t[s.key];
+    return out;
+  };
+  if (cameraTunablesFromDisk) {
+    for (const [name, cam] of Object.entries(cameras)) {
+      const saved = cameraTunablesFromDisk[name];
+      if (saved) applyCameraTunables(cam, saved);
+    }
+  }
+
   const initialCameraName = 'freeform';
   let activeCamera: CameraMode = cameras[initialCameraName];
   activeCamera.init();
@@ -238,6 +268,7 @@ export async function start(container: HTMLElement): Promise<void> {
         fogDensity?: number;
         dustOpacity?: number;
         dustSize?: number;
+        dustCount?: number;
       };
       morningShaftConfig = {};
       if (data.shafts && data.shafts.length) {
@@ -251,6 +282,7 @@ export async function start(container: HTMLElement): Promise<void> {
       if (typeof data.fogDensity === 'number') morningShaftConfig.fogDensity = data.fogDensity;
       if (typeof data.dustOpacity === 'number') morningShaftConfig.dustOpacity = data.dustOpacity;
       if (typeof data.dustSize === 'number') morningShaftConfig.dustSize = data.dustSize;
+      if (typeof data.dustCount === 'number') morningShaftConfig.dustCount = data.dustCount;
     }
   } catch (e) {
     console.warn('[atmosphere] config load failed, using defaults', e);
@@ -543,10 +575,7 @@ export async function start(container: HTMLElement): Promise<void> {
     }
   };
 
-  const logShaftConfig = () => morningShaft.logShaftConfig();
-
-  // Snapshot current camera pose (position + OrbitControls target if any).
-  // Used by both log and save.
+  // Snapshot current camera pose + per-mode tunables for save → positions.json.
   const snapshotCameraPose = (): { position: [number, number, number]; target: [number, number, number] } => {
     const r = (n: number) => Math.round(n * 1000) / 1000;
     const tgt = currentTarget();
@@ -556,19 +585,23 @@ export async function start(container: HTMLElement): Promise<void> {
     };
   };
 
-  const logCameraPose = () => {
-    console.log('[camera] exterior pose\n' + JSON.stringify(snapshotCameraPose(), null, 2));
-  };
-
   const formatCameraPositions = (data: {
     exterior: { position: [number, number, number]; target: [number, number, number] };
+    tunables: Record<string, Record<string, number>>;
   }): string => {
     const ex = data.exterior;
+    const tunableLines = Object.entries(data.tunables).map(([name, vals]) => {
+      const pairs = Object.entries(vals).map(([k, v]) => `"${k}": ${v}`).join(', ');
+      return `    "${name}": { ${pairs} }`;
+    });
     return (
       '{\n' +
       '  "exterior": {\n' +
       `    "position": [${ex.position.join(', ')}],\n` +
       `    "target": [${ex.target.join(', ')}]\n` +
+      '  },\n' +
+      '  "tunables": {\n' +
+      tunableLines.join(',\n') + '\n' +
       '  }\n' +
       '}\n'
     );
@@ -577,7 +610,11 @@ export async function start(container: HTMLElement): Promise<void> {
   const saveCameraPose = async () => {
     try {
       const pose = snapshotCameraPose();
-      const body = formatCameraPositions({ exterior: pose });
+      const tunables: Record<string, Record<string, number>> = {};
+      for (const [name, cam] of Object.entries(cameras)) {
+        tunables[name] = snapshotCameraTunables(cam);
+      }
+      const body = formatCameraPositions({ exterior: pose, tunables });
       const res = await fetch('/__lec/save-camera', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -585,7 +622,7 @@ export async function start(container: HTMLElement): Promise<void> {
       });
       if (!res.ok) throw new Error(`save responded ${res.status}: ${await res.text()}`);
       const result = (await res.json()) as { saved?: string };
-      console.log('[camera] saved →', result.saved, pose);
+      console.log('[camera] saved →', result.saved, { exterior: pose, tunables });
     } catch (e) {
       console.warn('[camera] save failed', e);
     }
@@ -603,7 +640,8 @@ export async function start(container: HTMLElement): Promise<void> {
       `  "shaftIntensity": ${cfg.shaftIntensity},\n` +
       `  "fogDensity": ${cfg.fogDensity},\n` +
       `  "dustOpacity": ${cfg.dustOpacity},\n` +
-      `  "dustSize": ${cfg.dustSize}\n` +
+      `  "dustSize": ${cfg.dustSize},\n` +
+      `  "dustCount": ${cfg.dustCount}\n` +
       '}\n'
     );
   };
@@ -626,28 +664,6 @@ export async function start(container: HTMLElement): Promise<void> {
     } catch (e) {
       console.warn('[atmosphere] save failed', e);
     }
-  };
-
-  const logHeroPositions = () => {
-    // manifest.json takes radians for rotation, so the JSON is paste-ready.
-    // The degrees readout that follows is purely for eyeballing.
-    const out: Record<string, { position: number[]; rotation: number[]; scale: number[] }> = {};
-    const deg: Record<string, number[]> = {};
-    const RAD2DEG = 180 / Math.PI;
-    for (const [id, obj] of heroLookup) {
-      out[id] = {
-        position: [r3(obj.position.x), r3(obj.position.y), r3(obj.position.z)],
-        rotation: [r3(obj.rotation.x), r3(obj.rotation.y), r3(obj.rotation.z)],
-        scale:    [r3(obj.scale.x),    r3(obj.scale.y),    r3(obj.scale.z)],
-      };
-      deg[id] = [
-        Math.round(obj.rotation.x * RAD2DEG * 10) / 10,
-        Math.round(obj.rotation.y * RAD2DEG * 10) / 10,
-        Math.round(obj.rotation.z * RAD2DEG * 10) / 10,
-      ];
-    }
-    console.log('[positions]\n' + JSON.stringify(out, null, 2));
-    console.log('[rotations (deg)]', deg);
   };
 
   // Audio + interaction engine.
@@ -684,13 +700,10 @@ export async function start(container: HTMLElement): Promise<void> {
     setEditTarget,
     setTransformMode,
     getTransformMode,
-    logHeroPositions,
     saveHeroPositions,
     shaftHandleIds,
     setShaftEditTarget,
-    logShaftConfig,
     saveShaftConfig,
-    logCameraPose,
     saveCameraPose,
   });
 
@@ -721,8 +734,25 @@ export async function start(container: HTMLElement): Promise<void> {
     mat.emissiveIntensity = on ? 0.6 : 0;
   };
 
-  // Debug hook for runtime inspection — read from devtools as `__lec.heroes`.
-  (window as Window & { __lec?: unknown }).__lec = { scene, heroLookup, transformControls };
+  // Debug hook for runtime inspection. Exposed surfaces let you poke at
+  // every subsystem from DevTools without re-wiring buttons:
+  //   __lec.heroLookup.get('hero_boombox')
+  //   __lec.morningShaft.getCurrentConfig()
+  //   __lec.audio.listPlaying()
+  //   __lec.activeCamera, __lec.activeAtmosphere
+  (window as Window & { __lec?: unknown }).__lec = {
+    scene,
+    camera,
+    renderer,
+    heroLookup,
+    transformControls,
+    audio,
+    atmospheres,
+    morningShaft,
+    cameras,
+    get activeCamera() { return activeCamera; },
+    get activeAtmosphere() { return activeAtmosphere; },
+  };
 
   let prev = performance.now();
   const tick = (now: number) => {

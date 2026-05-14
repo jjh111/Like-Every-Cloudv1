@@ -120,7 +120,10 @@ export class MorningShaft implements Atmosphere {
   private handles: Mesh[] = [];
   private dust: Points | null = null;
   private dustVelocities: Float32Array | null = null;
-  private dustCount: number;
+  /** Backing field for the dustCount setter — when changed, dust rebuilds on next update. */
+  private _dustCount: number;
+  /** Set by the dustCount setter so update() knows to rebuild on the next tick. */
+  private dustNeedsRebuild = false;
   private dustMin: Vector3;
   private dustMax: Vector3;
   private dotTex: CanvasTexture | null = null;
@@ -144,7 +147,7 @@ export class MorningShaft implements Atmosphere {
         radius: 0.75,
       },
     ];
-    this.dustCount = config?.dustCount ?? 800;
+    this._dustCount = config?.dustCount ?? 800;
     this.dustMin = config?.dustBoundsMin ?? new Vector3(-2.7, -0.4, -2.5);
     this.dustMax = config?.dustBoundsMax ?? new Vector3(1.6, 2.6, 1.6);
     if (typeof config?.shaftIntensity === 'number') this.shaftIntensity = config.shaftIntensity;
@@ -208,39 +211,9 @@ export class MorningShaft implements Atmosphere {
       this.cones.push({ mesh, material });
     }
 
-    // Dust system.
-    this.dotTex = makeDotTexture();
-    const positions = new Float32Array(this.dustCount * 3);
-    const velocities = new Float32Array(this.dustCount * 3);
-    const w = this.dustMax.x - this.dustMin.x;
-    const h = this.dustMax.y - this.dustMin.y;
-    const d = this.dustMax.z - this.dustMin.z;
-    for (let i = 0; i < this.dustCount; i++) {
-      positions[i * 3 + 0] = this.dustMin.x + Math.random() * w;
-      positions[i * 3 + 1] = this.dustMin.y + Math.random() * h;
-      positions[i * 3 + 2] = this.dustMin.z + Math.random() * d;
-      velocities[i * 3 + 0] = (Math.random() - 0.5) * 0.018;
-      velocities[i * 3 + 1] = Math.random() * 0.012 + 0.004; // gentle up-drift
-      velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.018;
-    }
-    const geomD = new BufferGeometry();
-    geomD.setAttribute('position', new BufferAttribute(positions, 3));
-    this.dustVelocities = velocities;
-
-    const matD = new PointsMaterial({
-      size: this.dustSize,
-      map: this.dotTex,
-      transparent: true,
-      depthWrite: false,
-      blending: AdditiveBlending,
-      color: 0xfff4d6,
-      opacity: this.dustOpacity,
-      sizeAttenuation: true,
-    });
-    this.dust = new Points(geomD, matD);
-    this.dust.frustumCulled = false; // motes near camera shouldn't pop out
-    this.dust.renderOrder = 6;
-    ctx.scene.add(this.dust);
+    // Dust system — separated into createDust so the dustCount setter can
+    // tear down + rebuild on the next update() tick without re-running init.
+    this.createDust(ctx.scene);
 
     // Per-endpoint handle meshes. Hidden by default; the dev panel surfaces a
     // dropdown that picks one of these as a TransformControls target. They're
@@ -271,13 +244,17 @@ export class MorningShaft implements Atmosphere {
   }
 
   update(ctx: AtmosphereContext, dt: number): void {
+    // Rebuild dust if the count changed (or bounds — same flag covers both).
+    if (this.dustNeedsRebuild) {
+      this.createDust(ctx.scene);
+    }
     // Drift dust + wraparound.
     if (this.dust && this.dustVelocities) {
       const posAttr = this.dust.geometry.getAttribute('position') as BufferAttribute;
       const arr = posAttr.array as Float32Array;
       const min = this.dustMin;
       const max = this.dustMax;
-      for (let i = 0; i < this.dustCount; i++) {
+      for (let i = 0; i < this._dustCount; i++) {
         let x = arr[i * 3 + 0] + this.dustVelocities[i * 3 + 0] * dt;
         let y = arr[i * 3 + 1] + this.dustVelocities[i * 3 + 1] * dt;
         let z = arr[i * 3 + 2] + this.dustVelocities[i * 3 + 2] * dt;
@@ -352,12 +329,70 @@ export class MorningShaft implements Atmosphere {
   get shaft1Radius(): number { return this.shafts[1]?.radius ?? 0; }
   set shaft1Radius(v: number) { if (this.shafts[1]) this.setShaftRadius(1, v); }
 
+  // Dust mote count. Setter rounds + flags a deferred rebuild that happens
+  // on the next update() so we don't reallocate during a slider drag spam.
+  get dustCount(): number { return this._dustCount; }
+  set dustCount(v: number) {
+    const n = Math.max(0, Math.round(v));
+    if (n === this._dustCount) return;
+    this._dustCount = n;
+    this.dustNeedsRebuild = true;
+  }
+
+  /** Tear down and recreate the Points system in place. Used at init + when
+   *  dustCount (and eventually bounds) changes. Material is reused across
+   *  rebuilds so live opacity/size sliders keep their wiring. */
+  private createDust(scene: Scene): void {
+    if (!this.dotTex) this.dotTex = makeDotTexture();
+    const count = this._dustCount;
+    const positions = new Float32Array(count * 3);
+    const velocities = new Float32Array(count * 3);
+    const w = this.dustMax.x - this.dustMin.x;
+    const h = this.dustMax.y - this.dustMin.y;
+    const d = this.dustMax.z - this.dustMin.z;
+    for (let i = 0; i < count; i++) {
+      positions[i * 3 + 0] = this.dustMin.x + Math.random() * w;
+      positions[i * 3 + 1] = this.dustMin.y + Math.random() * h;
+      positions[i * 3 + 2] = this.dustMin.z + Math.random() * d;
+      velocities[i * 3 + 0] = (Math.random() - 0.5) * 0.018;
+      velocities[i * 3 + 1] = Math.random() * 0.012 + 0.004; // gentle up-drift
+      velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.018;
+    }
+    const geom = new BufferGeometry();
+    geom.setAttribute('position', new BufferAttribute(positions, 3));
+    this.dustVelocities = velocities;
+
+    let mat: PointsMaterial;
+    if (this.dust) {
+      mat = this.dust.material as PointsMaterial;
+      scene.remove(this.dust);
+      this.dust.geometry.dispose();
+    } else {
+      mat = new PointsMaterial({
+        size: this.dustSize,
+        map: this.dotTex,
+        transparent: true,
+        depthWrite: false,
+        blending: AdditiveBlending,
+        color: 0xfff4d6,
+        opacity: this.dustOpacity,
+        sizeAttenuation: true,
+      });
+    }
+    this.dust = new Points(geom, mat);
+    this.dust.frustumCulled = false; // motes near camera shouldn't pop out
+    this.dust.renderOrder = 6;
+    scene.add(this.dust);
+    this.dustNeedsRebuild = false;
+  }
+
   getTunables(): AtmosphereTunables {
     const specs: AtmosphereTunables['specs'] = [
       { key: 'shaftIntensity', label: 'shaft intensity', min: 0, max: 1.5, step: 0.01 },
       { key: 'fogDensity', label: 'fog density', min: 0, max: 0.08, step: 0.001 },
       { key: 'dustOpacity', label: 'dust opacity', min: 0, max: 1, step: 0.01 },
       { key: 'dustSize', label: 'dust size', min: 0.005, max: 0.2, step: 0.005 },
+      { key: 'dustCount', label: 'dust count', min: 0, max: 2000, step: 50 },
     ];
     // Only surface a per-shaft radius slider for shafts that actually exist
     // so a config with fewer shafts (or NoAtmosphere) doesn't show dead knobs.
@@ -391,6 +426,7 @@ export class MorningShaft implements Atmosphere {
     fogDensity: number;
     dustOpacity: number;
     dustSize: number;
+    dustCount: number;
   } {
     const r3 = (n: number) => Math.round(n * 1000) / 1000;
     return {
@@ -399,6 +435,7 @@ export class MorningShaft implements Atmosphere {
       fogDensity: r3(this.fogDensity),
       dustOpacity: r3(this.dustOpacity),
       dustSize: r3(this.dustSize),
+      dustCount: this._dustCount,
     };
   }
 
@@ -415,17 +452,6 @@ export class MorningShaft implements Atmosphere {
   /** Toggle visibility of every shaft handle. */
   setHandlesVisible(visible: boolean): void {
     for (const h of this.handles) h.visible = visible;
-  }
-
-  /** Snapshot the current shaft config — paste into morningShaft.ts defaults. */
-  logShaftConfig(): void {
-    const r3 = (n: number) => Math.round(n * 1000) / 1000;
-    const out = this.shafts.map((s) => ({
-      origin: [r3(s.origin.x), r3(s.origin.y), r3(s.origin.z)],
-      aim: [r3(s.aim.x), r3(s.aim.y), r3(s.aim.z)],
-      radius: r3(s.radius),
-    }));
-    console.log('[shafts]\n' + JSON.stringify(out, null, 2));
   }
 
   /** Tune a single shaft's radius without touching its endpoints. */

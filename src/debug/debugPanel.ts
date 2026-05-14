@@ -28,17 +28,14 @@ export interface DebugDeps {
   setTransformMode: (mode: 'translate' | 'rotate' | 'scale') => void;
   /** So the panel can mirror W/E/R keyboard shortcuts. */
   getTransformMode: () => 'translate' | 'rotate' | 'scale';
-  logHeroPositions: () => void;
   /** Persist edited positions back to public/heroes/manifest.json via dev middleware. */
   saveHeroPositions: () => void;
-  /** Shaft-handle editing. Dropdown options + setter + console-log button. */
+  /** Shaft-handle editing. Dropdown options + setter. */
   shaftHandleIds: string[];
   setShaftEditTarget: (id: string) => void;
-  logShaftConfig: () => void;
-  /** Persist shaft endpoints/radii back to morning-shaft.json. */
+  /** Persist shaft endpoints/radii/tunables back to morning-shaft.json. */
   saveShaftConfig: () => void;
-  /** Capture the exterior camera pose — log to console / save to disk. */
-  logCameraPose: () => void;
+  /** Persist exterior camera pose + per-mode tunables back to positions.json. */
   saveCameraPose: () => void;
 }
 
@@ -95,7 +92,6 @@ export function createDebugPanel(deps: DebugDeps): GUI {
   const cameraFolder = gui.addFolder('camera');
   const cameraProxy = {
     camera: deps.initialCamera,
-    logExterior: () => deps.logCameraPose(),
     saveExterior: () => deps.saveCameraPose(),
   };
   cameraFolder.add(cameraProxy, 'camera', Object.keys(deps.cameras))
@@ -105,7 +101,6 @@ export function createDebugPanel(deps: DebugDeps): GUI {
       refreshCameraTunables();
     })
     .listen();
-  cameraFolder.add(cameraProxy, 'logExterior').name('log exterior pose');
   cameraFolder.add(cameraProxy, 'saveExterior').name('save → positions.json');
   // Per-camera tunables get added below cameraProxy via refreshCameraTunables.
   let cameraTunableControllers: Controller[] = [];
@@ -129,7 +124,6 @@ export function createDebugPanel(deps: DebugDeps): GUI {
   const editProxy = {
     target: '(none)',
     mode: 'translate' as 'translate' | 'rotate' | 'scale',
-    log: () => deps.logHeroPositions(),
     save: () => deps.saveHeroPositions(),
   };
   const editTargetCtrl = editFolder.add(editProxy, 'target', deps.heroIds)
@@ -148,7 +142,6 @@ export function createDebugPanel(deps: DebugDeps): GUI {
     .name('mode (W/E/R)')
     .onChange((v: 'translate' | 'rotate' | 'scale') => deps.setTransformMode(v))
     .listen();
-  editFolder.add(editProxy, 'log').name('log positions');
   editFolder.add(editProxy, 'save').name('save → manifest.json');
 
   // ── atmosphere ─────────────────────────────────────────────────────────
@@ -156,7 +149,6 @@ export function createDebugPanel(deps: DebugDeps): GUI {
   const atmosProxy = {
     atmosphere: deps.initialAtmosphere,
     shaftHandle: '(none)',
-    logShafts: () => deps.logShaftConfig(),
     saveShafts: () => deps.saveShaftConfig(),
   };
   atmosFolder.add(atmosProxy, 'atmosphere', Object.keys(deps.atmospheres))
@@ -199,7 +191,6 @@ export function createDebugPanel(deps: DebugDeps): GUI {
       }
       deps.setShaftEditTarget(v);
     });
-  atmosFolder.add(atmosProxy, 'logShafts').name('log shaft config');
   atmosFolder.add(atmosProxy, 'saveShafts').name('save → morning-shaft.json');
 
   // ── audio ──────────────────────────────────────────────────────────────
