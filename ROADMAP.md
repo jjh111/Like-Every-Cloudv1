@@ -31,11 +31,12 @@ Status legend: ⏳ in progress · ✅ done · 🔲 planned · ⏸ deferred
 
 | Item | Why | Status |
 |---|---|---|
-| **KTX2 / Basis Universal texture compression** | `npx gltf-transform uastc` cuts texture size 60–80%. Boombox 13MB → ~3MB. After this pass, GLBs probably fit in git directly | 🔲 |
-| **Texture resolution audit** | Most prop textures don't need 2K. 1K or 512 is fine for cassette-sized things. `npx gltf-transform resize` per-asset | 🔲 |
-| **Re-evaluate `.gitignore`** | Post-compression, the existing `public/heroes/*.glb` and `public/scene/*.glb` excludes might be unnecessary | 🔲 |
+| **Texture compression** | `npm run compress` runs `gltf-transform optimize --compress draco --texture-compress webp` over every runtime GLB. Boombox 13MB → 1.1MB (91% reduction); whole asset bundle 42MB → 3.6MB. Re-run after every Blender re-export. | ✅ |
+| **Re-evaluate `.gitignore`** | Post-compression, runtime GLBs are checked in via `!` exceptions in `.gitignore`. Total git-tracked asset weight: ~3.6 MB. | ✅ |
+| **Texture resolution audit** | Most prop textures don't need 2K. 1K or 512 is fine for cassette-sized things. `npx gltf-transform resize` per-asset. Lower priority now that WebP cut everything to <1MB; revisit if files grow. | ⏸ |
+| **Switch to KTX2 / Basis** | GPU-native textures — less VRAM, faster GPU upload than WebP. Needs the `ktx` CLI installed (not in brew core; build from KTX-Software releases or grab a prebuilt binary). Bring back `KTX2Loader` in `glbLoader.ts` and flip `--texture-compress` to `ktx2`. Defer until we hit a memory ceiling — not an issue for a 5-hero scene. | ⏸ |
 | **LODs** | Probably not needed at this scale | ⏸ |
-| **CDN for assets** | Defer until KTX2. If still needed, Cloudflare R2 + a `loadUrl` switch | ⏸ |
+| **CDN for assets** | Likely never needed at this size | ⏸ |
 
 ---
 
@@ -110,6 +111,7 @@ Status legend: ⏳ in progress · ✅ done · 🔲 planned · ⏸ deferred
 
 ## Recent shipped work (so we don't forget)
 
+- **2025-05-15** — Demo-mode polish + asset compression: `?dev=1` query string gates the dev/authoring surfaces (lil-gui panel, state radios, scene markers); top-center "go inside / outside" pill + top-right ⚙ dev-toggle for the demo view; loading overlay over the sky gradient; one-time controls hint chip; runtime assets committed to git (6 heroes + shared.glb whitelisted via `.gitignore` `!` exceptions); **`npm run compress` reduced the asset bundle 91.6% (42.6 MB → 3.6 MB)** via Draco mesh + WebP texture pipeline.
 - **2025-05-15** — Cleanup pass: gizmo purity (single-mode + W/E toggle + translate-purity watchdog), camera-save UX (read-only markers + two clear save buttons), RailsMode boot-pose fix, doorway off-path guard, cross-hero group prefers `#all` wrappers, DoubleSide on hero materials, README first-time setup walkthrough, `hero_table` and `hero_chair` re-exported with modifier-baked geometry + normalized empty origins.
 - **earlier** — Tier 1+2 architecture refactor: bookmarks, gizmo undo, hover labels, data-driven state music, hero/shared GLB pipeline, dev-panel save flows, wall cull, camera handles.
 

@@ -120,6 +120,7 @@ Open http://localhost:5173. The page boots **muted**; click the mute button in t
 - `npm run build` — typecheck + production build to `dist/`
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run preview` — serve the built `dist/`
+- `npm run compress` — re-compresses every runtime GLB in place (Draco mesh + WebP textures). Run after re-exporting from Blender — drops the bundle ~91%. `npm run compress hero_table` runs on just one file.
 
 ## What you see
 

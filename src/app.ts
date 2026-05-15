@@ -33,6 +33,7 @@ import { createHeroStatePanel, buildHeroDropdownMap } from './ui/heroStatePanel'
 import { createHoverLabel } from './ui/hoverLabel';
 import { createViewToggle } from './ui/viewToggle';
 import { createDevToggle } from './ui/devToggle';
+import { createControlsHint } from './ui/controlsHint';
 
 interface CameraBookmark { position: [number, number, number]; target: [number, number, number] }
 
@@ -298,7 +299,7 @@ export async function start(container: HTMLElement): Promise<void> {
       });
     }
   };
-  const glb = new GLBLoader();
+  const glb = new GLBLoader(renderer);
 
   // Defensive: glTF materials with alphaMode=BLEND import as transparent
   // and depthWrite=false. Both break opaque hero rendering — reset them.
@@ -764,6 +765,11 @@ export async function start(container: HTMLElement): Promise<void> {
   // Small ⚙ button top-right in demo view → opens dev view via ?dev=1.
   // Not shown in dev view because lil-gui already lives top-right there.
   if (!devMode) createDevToggle(false);
+
+  // One-time controls hint for first-time visitors. Suppresses itself on
+  // localStorage flag so returning visitors don't see the same chip again.
+  // Only shown in demo view — devs don't need it.
+  if (!devMode) createControlsHint();
 
   // Camera anchor markers (green = exterior pose, cyan = doorway) are
   // authoring aids — hide them on the demo view so directors don't see
