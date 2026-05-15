@@ -31,10 +31,16 @@ import { createAudioControls } from './ui/audioControls';
 import { createTracksBar } from './ui/tracksBar';
 import { createHeroStatePanel, buildHeroDropdownMap } from './ui/heroStatePanel';
 import { createHoverLabel } from './ui/hoverLabel';
+import { createViewToggle } from './ui/viewToggle';
 
 interface CameraBookmark { position: [number, number, number]; target: [number, number, number] }
 
 export async function start(container: HTMLElement): Promise<void> {
+  // `?dev=1` (or `?dev`) unlocks the authoring surfaces: the lil-gui dev
+  // panel, the per-hero state radio panel, and the green/cyan camera
+  // anchor markers. Default load is the polished demo view.
+  const devMode = new URLSearchParams(window.location.search).has('dev');
+
   const scene = createScene();
   const camera = createCamera(window.innerWidth, window.innerHeight);
   const renderer = createRenderer();
@@ -744,54 +750,72 @@ export async function start(container: HTMLElement): Promise<void> {
     snapshotPose,
   });
 
-  // ── Dev panel + side-panel UIs ──────────────────────────────────────
-  const debugPanel = createDebugPanel({
-    state: stateController,
-    transitions,
-    setTransition,
-    initialTransition: initialName,
-    cameras,
-    setCamera,
-    initialCamera: initialCameraName,
-    getActiveCamera,
-    atmospheres,
-    setAtmosphere,
-    initialAtmosphere: initialAtmosphereName,
-    getActiveAtmosphere,
-    audio,
-    getView,
-    toggleView: () => setView(getView() === 'exterior' ? 'interior' : 'exterior'),
-    heroIds: buildHeroDropdownMap(heroLookup),
-    setEditTarget,
-    getGizmoMode,
-    setGizmoMode,
-    saveHeroPositions: () => { void saves.saveHeroPositions(); },
-    shaftHandleIds,
-    setShaftEditTarget,
-    saveShaftConfig: () => { void saves.saveShaftConfig(); },
-    saveCameraPose: () => { void saves.saveCameraPose(); },
-    saveCurrentAsDoorway: () => { void saves.saveCurrentAsDoorway(); },
-    cullSettings,
-    // Bookmarks: list, go-to, save, delete. Panel rebuilds the dropdown
-    // when bookmarks change so the user sees their new entry immediately.
-    bookmarks,
-    goToBookmark,
-    saveCurrentAsBookmark: (name: string) => { void saves.saveCurrentAsBookmark(name); },
-    deleteBookmark: (name: string) => { void saves.deleteBookmark(name); },
-  });
+  // ── UI ──────────────────────────────────────────────────────────────
+  // Player-facing surfaces (always visible): mute pill, track inventory,
+  // view toggle. The dev surfaces (lil-gui panel, per-hero state radios,
+  // hero-id hover chip, camera anchor markers) only show under `?dev=1`.
+  const toggleView = (): void => setView(getView() === 'exterior' ? 'interior' : 'exterior');
 
   createAudioControls(audio);
   createTracksBar(audio, AUDIO_ASSETS);
-  createHeroStatePanel(heroLookup, stateController, () => {
-    // Re-cache the transition's mesh list against the new state tags so
-    // visibility flips immediately as the user toggles a radio.
-    active.dispose();
-    active.init(scene);
-    debugPanel.refreshHeroDropdown(buildHeroDropdownMap(heroLookup));
-  });
-  // Hover label: small floating chip showing the hero_id of whatever's
-  // under the cursor. Useful for picking the right hero by sight.
-  createHoverLabel({ pointer, domElement: renderer.domElement });
+  createViewToggle(getView, toggleView);
+
+  // Camera anchor markers (green = exterior pose, cyan = doorway) are
+  // authoring aids — hide them on the demo view so directors don't see
+  // floating dots in the scene.
+  if (!devMode) {
+    cameraHandles.exteriorMarker.visible = false;
+    cameraHandles.doorwayMarker.visible = false;
+  }
+
+  if (devMode) {
+    const debugPanel = createDebugPanel({
+      state: stateController,
+      transitions,
+      setTransition,
+      initialTransition: initialName,
+      cameras,
+      setCamera,
+      initialCamera: initialCameraName,
+      getActiveCamera,
+      atmospheres,
+      setAtmosphere,
+      initialAtmosphere: initialAtmosphereName,
+      getActiveAtmosphere,
+      audio,
+      getView,
+      toggleView,
+      heroIds: buildHeroDropdownMap(heroLookup),
+      setEditTarget,
+      getGizmoMode,
+      setGizmoMode,
+      saveHeroPositions: () => { void saves.saveHeroPositions(); },
+      shaftHandleIds,
+      setShaftEditTarget,
+      saveShaftConfig: () => { void saves.saveShaftConfig(); },
+      saveCameraPose: () => { void saves.saveCameraPose(); },
+      saveCurrentAsDoorway: () => { void saves.saveCurrentAsDoorway(); },
+      cullSettings,
+      // Bookmarks: list, go-to, save, delete. Panel rebuilds the dropdown
+      // when bookmarks change so the user sees their new entry immediately.
+      bookmarks,
+      goToBookmark,
+      saveCurrentAsBookmark: (name: string) => { void saves.saveCurrentAsBookmark(name); },
+      deleteBookmark: (name: string) => { void saves.deleteBookmark(name); },
+    });
+
+    createHeroStatePanel(heroLookup, stateController, () => {
+      // Re-cache the transition's mesh list against the new state tags so
+      // visibility flips immediately as the user toggles a radio.
+      active.dispose();
+      active.init(scene);
+      debugPanel.refreshHeroDropdown(buildHeroDropdownMap(heroLookup));
+    });
+
+    // Hover label: small floating chip showing the hero_id of whatever's
+    // under the cursor. Useful for picking the right hero by sight.
+    createHoverLabel({ pointer, domElement: renderer.domElement });
+  }
 
   window.addEventListener('resize', () => {
     const w = window.innerWidth;
@@ -833,6 +857,16 @@ export async function start(container: HTMLElement): Promise<void> {
     get activeCamera() { return activeCamera; },
     get activeAtmosphere() { return activeAtmosphere; },
   };
+
+  // Fade out the index.html loading overlay now that the scene is wired
+  // and the first render is about to happen. CSS handles the transition;
+  // we just toggle the class.
+  const loadingOverlay = document.getElementById('lec-loading');
+  if (loadingOverlay) {
+    loadingOverlay.classList.add('hidden');
+    // Remove from the DOM after the CSS transition so it can't catch input.
+    setTimeout(() => loadingOverlay.remove(), 800);
+  }
 
   let prev = performance.now();
   const tick = (now: number): void => {

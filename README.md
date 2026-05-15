@@ -123,17 +123,22 @@ Open http://localhost:5173. The page boots **muted**; click the mute button in t
 
 ## What you see
 
-A Blender-exported shop interior with hero objects (boombox, speaker, amp, table, monoblock chair, four cassettes on the table). Click a cassette to play its track through the boombox, spatialized via HRTF. Use the dev panel (top right) to toggle inside / outside, scrub between past and present, edit hero placements, tune the atmosphere, etc.
+A Blender-exported shop interior with hero objects (boombox, speaker, amp, table, monoblock chair, four cassettes on the table). Click a cassette to play its track through the boombox, spatialized via HRTF.
 
 The outside ↔ inside transition is animated by a `TweenCameraMode` that lerps position + lookAt for ~1.6s before handing off to the destination camera (freeform outside, rails orbit inside).
 
-### Three HUD pills
+### Two views
 
+- **Demo view** — http://localhost:5173 — what visitors see. Player UI only: `go inside →` pill (top center), mute + master volume (bottom left), track inventory (bottom center). No dev tooling, no scene markers.
+- **Dev view** — http://localhost:5173/?dev=1 — adds the full lil-gui authoring panel (top right), the per-hero state radio panel (bottom right), the green/cyan camera anchor markers in the scene, and the hover-label chip. Same scene, different UI.
+
+### Player HUD (always visible)
+
+- **top-center** — `go inside → / ← go outside` view toggle
 - **bottom-left** — mute toggle + master volume
 - **bottom-center** — track inventory, lit per channel when something is playing
-- **bottom-right** — hero count + current state
 
-### Dev panel (top right)
+### Dev panel (top right, `?dev=1` only)
 
 Folder-grouped, with a primary view-toggle button at the very top:
 
