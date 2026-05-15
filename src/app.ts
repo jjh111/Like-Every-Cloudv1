@@ -1,4 +1,4 @@
-import { Box3, Group, type Mesh, type MeshStandardMaterial, type Object3D, Vector3 } from 'three';
+import { Box3, DoubleSide, Group, type Mesh, type MeshStandardMaterial, type Object3D, Quaternion, Vector3 } from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { createCamera, createRenderer, createScene } from './scene/sceneGraph';
 import type { CameraMode } from './camera/cameraMode';
@@ -143,6 +143,13 @@ export async function start(container: HTMLElement): Promise<void> {
   const initialCameraName = 'freeform';
   let activeCamera: CameraMode = cameras[initialCameraName];
   activeCamera.init();
+  // Post-init log: OrbitControls.update() runs during init() and shouldn't
+  // change camera.position when the spherical round-trip is lossless. If
+  // this value drifts from the "applied exterior pose" log above, something
+  // is moving the camera between those two points.
+  console.log('[camera] post-init pose:',
+    `pos=[${camera.position.toArray().map((v) => v.toFixed(3)).join(', ')}]`,
+  );
 
   const setCamera = (name: string): void => {
     const next = cameras[name];
@@ -179,7 +186,15 @@ export async function start(container: HTMLElement): Promise<void> {
 
   /** Cross-fades the camera from current pose to (toPos, toTarget). Hands
    *  off to `destCamera` after the tween. Optionally routes through a
-   *  waypoint (used by setView to clear the doorway without clipping). */
+   *  waypoint (used by setView to clear the doorway without clipping).
+   *
+   *  Waypoint sanity check: if the proposed waypoint isn't on the path
+   *  between fromPos and toPos — measured by projecting it onto the
+   *  from→to line — we drop it and tween straight. Without this, a
+   *  doorway saved behind the exterior pose (e.g. further east than the
+   *  outside camera) creates a Catmull-Rom curve that lurches east first
+   *  then U-turns west into the interior. Better to go direct than to
+   *  detour through an off-path waypoint. */
   const tweenToPose = (
     toPos: Vector3,
     toTarget: Vector3,
@@ -189,6 +204,32 @@ export async function start(container: HTMLElement): Promise<void> {
     detachGizmos();
     const fromPos = camera.position.clone();
     const fromTarget = currentTarget();
+
+    let effectiveWaypoint = waypoint;
+    if (waypoint) {
+      const dir = new Vector3().subVectors(toPos, fromPos);
+      const lenSq = dir.lengthSq();
+      if (lenSq < 1e-6) {
+        effectiveWaypoint = undefined;
+      } else {
+        const fromW = new Vector3().subVectors(waypoint, fromPos);
+        const t = fromW.dot(dir) / lenSq;
+        // [0.05, 0.95] = waypoint is meaningfully between endpoints. Outside
+        // that range it'd just be a detour. The tight inner bound also avoids
+        // jitter when the camera is already sitting on the waypoint.
+        if (t < 0.05 || t > 0.95) {
+          console.warn(
+            `[camera] doorway at (${waypoint.x.toFixed(2)}, ${waypoint.y.toFixed(2)}, ${waypoint.z.toFixed(2)}) ` +
+            `isn't on the path from (${fromPos.x.toFixed(2)}, ${fromPos.y.toFixed(2)}, ${fromPos.z.toFixed(2)}) → ` +
+            `(${toPos.x.toFixed(2)}, ${toPos.y.toFixed(2)}, ${toPos.z.toFixed(2)}) — ` +
+            `t=${t.toFixed(2)}. Skipping waypoint; tweening straight. ` +
+            `Drag the cyan doorway marker onto the actual door opening to use it as a waypoint.`,
+          );
+          effectiveWaypoint = undefined;
+        }
+      }
+    }
+
     activeCamera.dispose();
     activeCamera = new TweenCameraMode(
       camera,
@@ -196,7 +237,7 @@ export async function start(container: HTMLElement): Promise<void> {
       { position: toPos.clone(), target: toTarget.clone() },
       VIEW_TWEEN_DURATION,
       () => setCamera(destCamera),
-      waypoint,
+      effectiveWaypoint,
     );
     activeCamera.init();
   };
@@ -273,6 +314,29 @@ export async function start(container: HTMLElement): Promise<void> {
     });
   };
 
+  // Hero-only: force every material to render both sides. Blender exports
+  // `doubleSided: false` for any material with backface-culling enabled, and
+  // imported props frequently have a few inverted normals from their source —
+  // the combination makes front faces silently invisible (you see through
+  // the prop to its inside). DoubleSide eliminates the dependency on
+  // per-mesh normal correctness, which is the kind of data hygiene we don't
+  // want to enforce per export. Not applied to shared.glb because walls
+  // SHOULD stay single-sided (you don't want to see interior textures from
+  // outside).
+  const forceDoubleSidedMaterials = (root: Object3D): void => {
+    root.traverse((obj) => {
+      const m = (obj as Mesh).material;
+      if (!m) return;
+      const list = Array.isArray(m) ? m : [m];
+      for (const mat of list) {
+        if (mat.side !== DoubleSide) {
+          mat.side = DoubleSide;
+          mat.needsUpdate = true;
+        }
+      }
+    });
+  };
+
   try {
     const sharedScene = await glb.load('/scene/shared.glb');
     forceOpaqueMaterials(sharedScene);
@@ -287,6 +351,7 @@ export async function start(container: HTMLElement): Promise<void> {
     const heroObjects = await heroes.loadFromManifest('/heroes/manifest.json');
     for (const h of heroObjects) {
       forceOpaqueMaterials(h);
+      forceDoubleSidedMaterials(h);
       contentRoot.add(h);
     }
     indexHeroes(heroObjects);
@@ -472,18 +537,17 @@ export async function start(container: HTMLElement): Promise<void> {
   });
   engine.arm();
 
-  // ── Gizmo (single, mode-toggled) ────────────────────────────────────
-  // One TransformControls instance, switched between translate / rotate via
-  // W / E keys (three.js convention). The previous two-instance "compound"
-  // setup had translate arrows and rotate rings overlapping at the object
-  // origin — clicking near a translate arrow tip often caught the
-  // perpendicular rotate ring, so "translate" silently became "rotate
-  // around the bottom origin". Single mode + explicit toggle eliminates the
-  // ambiguity.
+  // ── Gizmo ───────────────────────────────────────────────────────────
+  // ONE TransformControls. Mode toggle lives in the dev panel "edit" folder:
+  // translate by default, switch to rotate when needed (E key as shortcut).
+  // Showing both gizmos at once meant translate arrows and rotate rings
+  // shared the same gizmo origin and converged at small camera distances —
+  // grabbing one frequently caught the other, producing rotations during
+  // what felt like a translate drag. Single gizmo = no overlap, no surprise.
   //
-  // `lockedToTranslate` keeps the camera/shaft markers translate-only —
-  // rotating them is meaningless (they're position-only handles) and the
-  // W/E keys are no-ops while locked.
+  // `editable` targets respect the mode dropdown. `translate-only` targets
+  // (shaft handles) force translate and reject mode-switch attempts —
+  // rotating a position-only handle is meaningless.
   const tc = new TransformControls(camera, renderer.domElement);
   tc.setMode('translate');
   const helper = tc.getHelper();
@@ -497,9 +561,13 @@ export async function start(container: HTMLElement): Promise<void> {
   };
   tc.addEventListener('dragging-changed', onGizmoDrag);
 
-  type GizmoMode = 'compound' | 'translate-only';
-  let lockedToTranslate = false;
-  const attachGizmo = (obj: Object3D | null, mode: GizmoMode = 'compound'): void => {
+  type GizmoTargetMode = 'editable' | 'translate-only';
+  let currentTargetMode: GizmoTargetMode = 'editable';
+  // Visible to the dev panel + the W/E shortcuts. Reads as the displayed
+  // gizmo mode (translate or rotate). Only meaningful for `editable` targets.
+  let gizmoMode: 'translate' | 'rotate' = 'translate';
+
+  const attachGizmo = (obj: Object3D | null, mode: GizmoTargetMode = 'editable'): void => {
     if (!obj) {
       tc.detach();
       helper.visible = false;
@@ -507,31 +575,82 @@ export async function start(container: HTMLElement): Promise<void> {
       return;
     }
     tc.attach(obj);
-    // Always start in translate so "pick hero → drag" is the default action.
-    // User can press E to switch to rotate when needed.
-    tc.setMode('translate');
+    currentTargetMode = mode;
+    // Locked targets always translate. Editable targets honor whatever the
+    // user last set via the dropdown — but a fresh pick resets to translate
+    // so the safer action is always one click away.
+    if (mode === 'translate-only') {
+      tc.setMode('translate');
+    } else {
+      gizmoMode = 'translate';
+      tc.setMode('translate');
+    }
     helper.visible = true;
     tc.enabled = true;
-    lockedToTranslate = mode === 'translate-only';
   };
   const getGizmoTarget = (): Object3D | null => (tc.object as Object3D | null) ?? null;
+  const getGizmoMode = (): 'translate' | 'rotate' => gizmoMode;
+  const setGizmoMode = (m: 'translate' | 'rotate'): void => {
+    // Translate-only targets ignore rotate requests — keeps the dropdown
+    // sane when a shaft handle is selected.
+    if (currentTargetMode === 'translate-only' && m === 'rotate') return;
+    gizmoMode = m;
+    if (tc.object) tc.setMode(m);
+  };
 
-  // Keyboard mode toggle: W = translate, E = rotate. Only fires while the
-  // gizmo is attached and the user isn't typing in a text field. Locked
-  // targets (markers) ignore the toggle.
+  // W = translate, E = rotate. Identical to the dropdown, just faster.
   window.addEventListener('keydown', (e) => {
     if (!tc.object) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const tag = (e.target as HTMLElement | null)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement | null)?.isContentEditable) return;
-    if (e.key === 'w' || e.key === 'W') {
-      e.preventDefault();
-      tc.setMode('translate');
-    } else if (e.key === 'e' || e.key === 'E') {
-      if (lockedToTranslate) return;
-      e.preventDefault();
-      tc.setMode('rotate');
+    if (e.key === 'w' || e.key === 'W') { e.preventDefault(); setGizmoMode('translate'); }
+    else if (e.key === 'e' || e.key === 'E') { e.preventDefault(); setGizmoMode('rotate'); }
+  });
+
+  // Translate-purity watchdog. Empirically: while the gizmo is in 'translate'
+  // mode, dragging an arrow sometimes also mutates the target's quaternion
+  // / scale — visible as the hero spinning around the axis you're sliding
+  // along. The translate handler in three.js TransformControls only writes
+  // to object.position, so whatever's leaking rotation must be downstream
+  // (cross-hero group transform accumulating, glTF root with non-identity
+  // TRS, etc.). Cheap defense: snapshot quaternion + scale at drag start,
+  // restore on every objectChange while in translate. The first leak per
+  // drag logs to console so we can find the root cause.
+  let translateBaseline: { obj: Object3D; quaternion: Quaternion; scale: Vector3 } | null = null;
+  let translateLeakLogged = false;
+  tc.addEventListener('mouseDown', () => {
+    const obj = tc.object;
+    if (!obj || tc.getMode() !== 'translate') {
+      translateBaseline = null;
+      return;
     }
+    translateBaseline = {
+      obj,
+      quaternion: obj.quaternion.clone(),
+      scale: obj.scale.clone(),
+    };
+    translateLeakLogged = false;
+  });
+  tc.addEventListener('objectChange', () => {
+    if (!translateBaseline) return;
+    const { obj, quaternion, scale } = translateBaseline;
+    if (!obj.quaternion.equals(quaternion)) {
+      if (!translateLeakLogged) {
+        console.warn('[gizmo] translate drag mutated quaternion; restoring.',
+          { heroId: obj.userData?.hero_id,
+            baseline: quaternion.toArray(),
+            leaked: obj.quaternion.toArray() });
+        translateLeakLogged = true;
+      }
+      obj.quaternion.copy(quaternion);
+    }
+    if (!obj.scale.equals(scale)) {
+      obj.scale.copy(scale);
+    }
+  });
+  tc.addEventListener('mouseUp', () => {
+    translateBaseline = null;
   });
 
   // Undo/redo for gizmo edits. Captures pre/post matrices on every drag.
@@ -561,24 +680,17 @@ export async function start(container: HTMLElement): Promise<void> {
     }
     const obj = heroLookup.get(heroId);
     if (!obj) return;
-    attachGizmo(obj, 'compound');
+    attachGizmo(obj, 'editable');
     switchToFreeformPreservingView(obj);
   };
 
   // ── Camera handles ──────────────────────────────────────────────────
+  // Two always-visible read-only markers (green = exterior, cyan = doorway)
+  // showing where the saved camera anchors live. Editing is camera-snapshot
+  // only: orbit the live camera, hit "set outside view here" or "set doorway
+  // here" — the corresponding Vector3 updates and the marker follows on the
+  // next syncToSources tick. No gizmo attaches to these markers.
   const cameraHandles = createCameraHandles(scene, exteriorPos, doorway);
-
-  type CameraHandleId = '(none)' | 'exterior' | 'doorway';
-  const setCameraHandleEditTarget = (id: CameraHandleId): void => {
-    cameraHandles.setVisible(id);
-    if (id === '(none)') {
-      attachGizmo(null);
-      return;
-    }
-    const marker = id === 'exterior' ? cameraHandles.exteriorMarker : cameraHandles.doorwayMarker;
-    attachGizmo(marker, 'translate-only');
-    switchToFreeformPreservingView(marker);
-  };
 
   // ── Shaft handles ───────────────────────────────────────────────────
   const morningShaft = atmospheres['morning-shaft'] as MorningShaft;
@@ -605,10 +717,10 @@ export async function start(container: HTMLElement): Promise<void> {
 
   // Now that all gizmo targets exist, wire the detach helper that
   // tweenToPose / setView call before re-attaching the camera mode.
+  // (Camera handle markers are passive visualizations — nothing to detach.)
   detachGizmos = () => {
     attachGizmo(null);
     morningShaft.setHandlesVisible(false);
-    cameraHandles.hideAll();
   };
 
   // ── Save flows ──────────────────────────────────────────────────────
@@ -630,12 +742,6 @@ export async function start(container: HTMLElement): Promise<void> {
     cullSettings,
     bookmarks,
     snapshotPose,
-    // The exterior/doorway markers are visible iff the user picked
-    // "edit handle: exterior/doorway" in the dev panel — that's our
-    // signal to preserve the gizmo-driven pose on save instead of
-    // snapping to the current camera position.
-    isEditingExteriorMarker: () => cameraHandles.exteriorMarker.visible,
-    isEditingDoorwayMarker: () => cameraHandles.doorwayMarker.visible,
   });
 
   // ── Dev panel + side-panel UIs ──────────────────────────────────────
@@ -657,13 +763,14 @@ export async function start(container: HTMLElement): Promise<void> {
     toggleView: () => setView(getView() === 'exterior' ? 'interior' : 'exterior'),
     heroIds: buildHeroDropdownMap(heroLookup),
     setEditTarget,
+    getGizmoMode,
+    setGizmoMode,
     saveHeroPositions: () => { void saves.saveHeroPositions(); },
     shaftHandleIds,
     setShaftEditTarget,
     saveShaftConfig: () => { void saves.saveShaftConfig(); },
     saveCameraPose: () => { void saves.saveCameraPose(); },
     saveCurrentAsDoorway: () => { void saves.saveCurrentAsDoorway(); },
-    setCameraHandleEditTarget,
     cullSettings,
     // Bookmarks: list, go-to, save, delete. Panel rebuilds the dropdown
     // when bookmarks change so the user sees their new entry immediately.

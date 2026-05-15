@@ -22,10 +22,15 @@ export interface DebugDeps {
   /** High-level outside/inside toggle. */
   getView: () => 'exterior' | 'interior';
   toggleView: () => void;
-  /** Edit-mode controls — pick a hero, get a compound translate+rotate gizmo.
+  /** Edit-mode controls — pick a hero, get a single gizmo whose mode (translate
+   *  vs rotate) is governed by setGizmoMode.
    *  Object-keyed: display label (e.g. "hero_speaker (past)") → bare hero id. */
   heroIds: Record<string, string>;
   setEditTarget: (heroId: string) => void;
+  /** Read the current gizmo mode for the edit-folder dropdown. */
+  getGizmoMode: () => 'translate' | 'rotate';
+  /** Switch the gizmo mode. The dropdown calls this; W/E keys also do. */
+  setGizmoMode: (mode: 'translate' | 'rotate') => void;
   /** Persist edited positions back to public/heroes/manifest.json via dev middleware. */
   saveHeroPositions: () => void;
   /** Shaft-handle editing. Dropdown options + setter. */
@@ -33,12 +38,12 @@ export interface DebugDeps {
   setShaftEditTarget: (id: string) => void;
   /** Persist shaft endpoints/radii/tunables back to morning-shaft.json. */
   saveShaftConfig: () => void;
-  /** Persist exterior camera pose + per-mode tunables back to positions.json. */
+  /** Snapshot current camera position + target as the exterior pose, persist
+   *  positions.json. Updates the green exterior marker on next sync tick. */
   saveCameraPose: () => void;
-  /** Snapshot current camera position as the doorway waypoint + save. */
+  /** Snapshot current camera position as the doorway waypoint, persist
+   *  positions.json. Updates the cyan doorway marker on next sync tick. */
   saveCurrentAsDoorway: () => void;
-  /** Attach the gizmo to one of the camera handles (exterior pose / doorway). */
-  setCameraHandleEditTarget: (id: '(none)' | 'exterior' | 'doorway') => void;
   /** Live tunables for the wall-cull clipping plane. Panel binds directly. */
   cullSettings: { offset: number; enabled: boolean };
   /** Camera bookmarks — live map, panel reads it directly on rebuild. */
@@ -112,7 +117,6 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
   const cameraFolder = gui.addFolder('camera');
   const cameraProxy = {
     camera: deps.initialCamera,
-    handle: '(none)' as '(none)' | 'exterior' | 'doorway',
     bookmark: BOOKMARK_PLACEHOLDER,
     saveExterior: () => deps.saveCameraPose(),
     saveDoorway: () => deps.saveCurrentAsDoorway(),
@@ -164,27 +168,6 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
   }
   refreshCameraTunables();
 
-  // Camera-handle dropdown: pick the exterior pose marker (green) or the
-  // doorway waypoint marker (cyan) to attach the gizmo. Cross-clears the
-  // hero edit + shaft edit dropdowns so only one gizmo target is active.
-  const cameraHandleCtrl = cameraFolder.add(cameraProxy, 'handle', ['(none)', 'exterior', 'doorway'])
-    .name('edit handle')
-    .onChange((v: '(none)' | 'exterior' | 'doorway') => {
-      if (v !== '(none)') {
-        if (editProxy.target !== '(none)') {
-          editProxy.target = '(none)';
-          editTargetCtrl.updateDisplay();
-          deps.setEditTarget('(none)');
-        }
-        if (atmosProxy.shaftHandle !== '(none)') {
-          atmosProxy.shaftHandle = '(none)';
-          shaftHandleCtrl.updateDisplay();
-          deps.setShaftEditTarget('(none)');
-        }
-      }
-      deps.setCameraHandleEditTarget(v);
-    });
-
   // Bookmarks: tween-to-pose dropdown. Picking a bookmark immediately fires
   // goToBookmark, then the proxy resets to "(none)" so picking the same
   // bookmark again re-fires onChange (lil-gui skips same-value changes).
@@ -227,16 +210,21 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
     .name('cull offset (m)')
     .listen();
 
-  // Save buttons at the bottom — these commit *everything* in this folder
-  // (exterior pose, doorway, AABB, cull settings, per-mode tunables,
-  // bookmarks) to positions.json.
-  cameraFolder.add(cameraProxy, 'saveDoorway').name('save current as doorway');
-  cameraFolder.add(cameraProxy, 'saveExterior').name('save → positions.json (all)');
+  // The two anchor points. Each button snapshots the LIVE camera into the
+  // corresponding persisted slot and rewrites positions.json. The colored
+  // markers in the scene (green = exterior, cyan = doorway) follow on the
+  // next sync tick so you always see where the saved values live.
+  //
+  //   set outside view here  → camera.position + camera.lookAt → exterior pose
+  //   set doorway here       → camera.position → doorway waypoint
+  cameraFolder.add(cameraProxy, 'saveExterior').name('set outside view here');
+  cameraFolder.add(cameraProxy, 'saveDoorway').name('set doorway here');
 
   // ── edit ───────────────────────────────────────────────────────────────
   const editFolder = gui.addFolder('edit');
   const editProxy = {
     target: '(none)',
+    gizmoMode: 'translate' as 'translate' | 'rotate',
     save: () => deps.saveHeroPositions(),
   };
   // editTargetCtrl is reassigned by refreshHeroDropdown when state tags
@@ -246,21 +234,28 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
     .name('edit hero')
     .onChange(onEditTargetChanged);
   function onEditTargetChanged(v: string): void {
-    // Picking a hero clears any other gizmo selection — one target at a time.
+    // Picking a hero clears the shaft selection — one gizmo target at a time.
+    // The camera-handle markers are passive visualizations now, so there's
+    // nothing to clear there.
     if (v !== '(none)') {
       if (atmosProxy.shaftHandle !== '(none)') {
         atmosProxy.shaftHandle = '(none)';
         shaftHandleCtrl.updateDisplay();
         deps.setShaftEditTarget('(none)');
       }
-      if (cameraProxy.handle !== '(none)') {
-        cameraProxy.handle = '(none)';
-        cameraHandleCtrl.updateDisplay();
-        deps.setCameraHandleEditTarget('(none)');
-      }
     }
     deps.setEditTarget(v);
+    // attachGizmo resets mode to translate on every pick — keep the dropdown
+    // in sync so it doesn't lie about the current state.
+    editProxy.gizmoMode = 'translate';
+    gizmoModeCtrl.updateDisplay();
   }
+  // Single gizmo with mode toggle. Default translate; user picks rotate when
+  // they want to spin a hero. The W / E keyboard shortcuts (in app.ts) do
+  // the same thing — this dropdown is the discoverable surface.
+  const gizmoModeCtrl = editFolder.add(editProxy, 'gizmoMode', ['translate', 'rotate'])
+    .name('gizmo (W/E)')
+    .onChange((v: 'translate' | 'rotate') => deps.setGizmoMode(v));
   editFolder.add(editProxy, 'save').name('save → manifest.json');
 
   // ── atmosphere ─────────────────────────────────────────────────────────
@@ -302,17 +297,12 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
   const shaftHandleCtrl = atmosFolder.add(atmosProxy, 'shaftHandle', deps.shaftHandleIds)
     .name('edit shaft')
     .onChange((v: string) => {
-      // Symmetric: picking a shaft handle clears the other gizmo targets.
+      // Picking a shaft handle clears the hero selection — one gizmo at a time.
       if (v !== '(none)') {
         if (editProxy.target !== '(none)') {
           editProxy.target = '(none)';
           editTargetCtrl.updateDisplay();
           deps.setEditTarget('(none)');
-        }
-        if (cameraProxy.handle !== '(none)') {
-          cameraProxy.handle = '(none)';
-          cameraHandleCtrl.updateDisplay();
-          deps.setCameraHandleEditTarget('(none)');
         }
       }
       deps.setShaftEditTarget(v);
@@ -370,6 +360,14 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
         }
       }
       refreshCameraTunables();
+    }
+
+    // W/E shortcuts mutate gizmo mode in app.ts without going through the
+    // dropdown — pull the displayed value into sync each tick.
+    const mode = deps.getGizmoMode();
+    if (editProxy.gizmoMode !== mode) {
+      editProxy.gizmoMode = mode;
+      gizmoModeCtrl.updateDisplay();
     }
   }, 100);
 

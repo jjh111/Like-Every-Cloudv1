@@ -138,8 +138,8 @@ The outside ↔ inside transition is animated by a `TweenCameraMode` that lerps 
 Folder-grouped, with a primary view-toggle button at the very top:
 
 - **state** — `target` (past / present), `progress` scrub, `duration`, snap / animate buttons, transition strategy dropdown
-- **camera** — mode dropdown (`freeform` / `interior-walk` / `interior-orbit`), mode-specific tunables, **bookmarks** (`go to bookmark` dropdown + `save bookmark…` + `delete current bookmark`), `edit handle` (exterior pose / doorway markers), wall-cull on / offset, `save current as doorway`, `save → positions.json (all)`
-- **edit** — `edit hero` dropdown (compound translate + rotate gizmo, **W / E / R** shortcuts, **⌘Z / ⌃Z** to undo a drag), `save → manifest.json`
+- **camera** — mode dropdown (`freeform` / `interior-walk` / `interior-orbit`), mode-specific tunables, **bookmarks** (`go to bookmark` dropdown + `save bookmark…` + `delete current bookmark`), wall-cull on / offset, `set outside view here` (camera.position + camera.lookAt → exterior pose), `set doorway here` (camera.position → doorway waypoint). The green and cyan dots in the scene are read-only visualizations of the saved positions — they follow whatever you save.
+- **edit** — `edit hero` dropdown, `gizmo` mode toggle (translate / rotate — also **W** / **E** keys), **⌘Z / ⌃Z** to undo a drag, `save → manifest.json`. Only one gizmo is visible at a time so translate can't accidentally trigger rotation.
 - **atmosphere** — preset (`morning-shaft` / `none`), shaft intensity / fog density / dust opacity / dust size / dust count sliders, per-shaft radius sliders, `edit shaft` handle gizmo, `save → morning-shaft.json`
 - **audio** — mute, master vol, per-channel vols (ambient / music / narration / sfx)
 
@@ -328,11 +328,11 @@ When in interior view AND active mode is `freeform` AND camera is outside `inter
 
 | What | Where | Saved by |
 |---|---|---|
-| Exterior pose | positions.json `exterior` | `save → positions.json (all)` |
-| Doorway waypoint | positions.json `doorway` | same, or `save current as doorway` |
-| Interior AABB | positions.json `interiorAABB` | `save → positions.json (all)` |
-| Wall-cull offset + enabled | positions.json `cull` | `save → positions.json (all)` |
-| Per-mode tunables | positions.json `tunables[modeName]` | `save → positions.json (all)` |
+| Exterior pose | positions.json `exterior` | `set outside view here` |
+| Doorway waypoint | positions.json `doorway` | `set doorway here` |
+| Interior AABB | positions.json `interiorAABB` | either save button (rewrites full file) |
+| Wall-cull offset + enabled | positions.json `cull` | either save button (rewrites full file) |
+| Per-mode tunables | positions.json `tunables[modeName]` | either save button (rewrites full file) |
 | Camera bookmarks | positions.json `bookmarks[name]` | `save bookmark…` / `delete current bookmark` |
 | Hero placements + state tags | heroes/manifest.json | `save → manifest.json` |
 | Atmosphere shafts + tunables | atmosphere/morning-shaft.json | `save → morning-shaft.json` |

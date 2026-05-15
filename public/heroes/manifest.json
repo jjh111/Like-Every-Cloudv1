@@ -8,7 +8,6 @@
         {
           "state": "past",
           "position": [-0.384, 0.408, -1.722],
-          "rotation": [0, 0, 0],
           "userData": { "group_id": "shop_set" }
         }
       ]
@@ -84,7 +83,6 @@
         {
           "state": "both",
           "position": [-0.381, -0.357, -1.614],
-          "rotation": [0, 0, 0],
           "userData": { "group_id": "shop_set" }
         }
       ]
@@ -96,8 +94,7 @@
       "placements": [
         {
           "state": "both",
-          "position": [-1.358, -0.395, -1.048],
-          "rotation": [0, 0, 0],
+          "position": [-1.358, -0.395, -0.717],
           "userData": { "group_id": "shop_set" }
         }
       ]

@@ -153,21 +153,10 @@ export interface SaveFlowDeps {
   interiorAABB: Box3;
   cullSettings: CullSettings;
   bookmarks: Record<string, { position: [number, number, number]; target: [number, number, number] }>;
-  /** Snapshot of the live camera pose. Tween-friendly — callers usually
-   *  pull from the active camera's controls.target, or the forward ray.
-   *  Used for saveCameraPose (writes current → exterior) and bookmark save
-   *  (writes current → bookmark entry). NOT used for doorway / delete saves. */
+  /** Snapshot of the live camera pose — position from camera.position, target
+   *  from controls.target (freeform) or the forward ray (rails). Used by
+   *  every save flow that writes "current view" into persisted state. */
   snapshotPose: () => { position: [number, number, number]; target: [number, number, number] };
-  /** True while the user has the exterior-pose marker selected for editing.
-   *  When true, saveCameraPose preserves exteriorPos/Target as-is (the
-   *  marker is already syncing into exteriorPos each tick via
-   *  cameraHandles.syncToSources). When false, it snaps from the current
-   *  camera — the "I framed a nice shot, save it" workflow. */
-  isEditingExteriorMarker: () => boolean;
-  /** Same idea for the doorway marker — when true, saveCurrentAsDoorway
-   *  preserves the doorway value (set by gizmo drag → syncToSources)
-   *  instead of overwriting with the camera position. */
-  isEditingDoorwayMarker: () => boolean;
 }
 
 export interface SaveFlows {
@@ -231,37 +220,22 @@ export function createSaveFlows(deps: SaveFlowDeps): SaveFlows {
     }
   };
 
-  // The ONLY save flow that updates the exterior pose.
-  //
-  //   - Normal workflow ("I orbited to a nice shot, hit save"): snapshot the
-  //     live camera and write it into the source-of-truth vectors so
-  //     subsequent setView('exterior') / wall-cull / bookmark saves all see
-  //     the new pose immediately.
-  //   - Marker-edit workflow ("I dragged the green exterior gizmo, hit
-  //     save"): exteriorPos already reflects the marker via syncToSources.
-  //     Skip the snapshot so the drag is preserved. Target is also left
-  //     alone — to update the target separately, deselect the marker,
-  //     orbit, and save.
+  // Snapshot current camera pose → exterior position + target. Camera-only
+  // workflow: orbit to the framing you want, hit the button. The green
+  // marker follows on the next tick via cameraHandles.syncToSources.
   const saveCameraPose = async (): Promise<void> => {
-    if (!deps.isEditingExteriorMarker()) {
-      const p = snapshotPose();
-      exteriorPos.set(p.position[0], p.position[1], p.position[2]);
-      exteriorTarget.set(p.target[0], p.target[1], p.target[2]);
-    }
+    const p = snapshotPose();
+    exteriorPos.set(p.position[0], p.position[1], p.position[2]);
+    exteriorTarget.set(p.target[0], p.target[1], p.target[2]);
     return postCameraConfig('exterior pose saved');
   };
 
-  // Two workflows wrapped in one save:
-  //   - Normal: orbit to the doorway threshold, hit save → doorway = camera pos.
-  //   - Marker-edit: drag the cyan doorway gizmo, hit save → preserve the
-  //     dragged value (`doorway` already reflects the marker via
-  //     cameraHandles.syncToSources). Without this branch, the camera
-  //     position would clobber the user's deliberate drag.
+  // Snapshot current camera position → doorway. Same workflow, position-only:
+  // fly the camera onto the threshold, hit the button. The cyan marker
+  // follows on the next tick.
   const saveCurrentAsDoorway = async (): Promise<void> => {
-    if (!deps.isEditingDoorwayMarker()) {
-      const p = snapshotPose().position;
-      doorway.set(p[0], p[1], p[2]);
-    }
+    const p = snapshotPose().position;
+    doorway.set(p[0], p[1], p[2]);
     return postCameraConfig('doorway saved');
   };
 

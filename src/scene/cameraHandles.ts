@@ -1,40 +1,36 @@
 import { Mesh, MeshBasicMaterial, type Scene, SphereGeometry, Vector3 } from 'three';
 
-// Colored sphere markers for the exterior camera pose + the doorway tween
-// waypoint. Hidden by default; the dev panel surfaces them as gizmo targets.
+// Always-visible visualization dots for the two persisted camera points:
+//   - green sphere at exteriorPos     (where the camera starts on page load)
+//   - cyan sphere at doorway          (the tween waypoint for in/out)
 //
-// Bidirectional sync: dragging the gizmo (marker → vector) and external
-// mutation of the vector (e.g. saveCurrentAsDoorway → vector → marker) both
-// flow through `syncToSources()`. We attribute direction by tracking each
-// marker's last-known position — if the marker moved since the last tick,
-// the gizmo is dragging it; otherwise any vector-vs-marker mismatch means
-// the vector was changed externally and the marker should follow.
+// Read-only by design. The UX is camera-snapshot: orbit the live camera to
+// the pose you want, hit "set outside view here" / "set doorway here" — those
+// flows update the source-of-truth Vector3s, and `syncToSources()` pulls the
+// markers along on the next tick so the dots stay aligned with the saved
+// values. No marker-drag, no edit dropdown, no hidden state.
 //
-// Without this, a save that mutates the doorway Vector3 lasts only one
-// tick before the marker (still at the old position) clobbers it back.
+// Both markers render with depthTest:false so they're never hidden behind
+// walls — that's the whole point of "showing where the saved point is".
 export interface CameraHandles {
   exteriorMarker: Mesh;
   doorwayMarker: Mesh;
-  /** Show one marker, hide the other (or both hidden if id === '(none)'). */
-  setVisible(id: '(none)' | 'exterior' | 'doorway'): void;
-  /** Hide every marker. Used by the global detachGizmos in app.ts. */
-  hideAll(): void;
-  /** Per-tick: keep marker.position and the source vectors in sync. */
+  /** Per-tick: pull each marker to match its Vector3. One-way, since the
+   *  markers don't drive anything anymore. */
   syncToSources(): void;
 }
 
 const makeHandle = (color: number, scene: Scene, at: Vector3): Mesh => {
   const m = new Mesh(
-    new SphereGeometry(0.09, 14, 12),
+    new SphereGeometry(0.07, 14, 12),
     new MeshBasicMaterial({
       color,
       depthTest: false,
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.8,
     }),
   );
   m.renderOrder = 100;
-  m.visible = false;
   m.position.copy(at);
   scene.add(m);
   return m;
@@ -45,41 +41,13 @@ export function createCameraHandles(
   exteriorPos: Vector3,
   doorway: Vector3,
 ): CameraHandles {
-  // Green = exterior, cyan = doorway.
   const exteriorMarker = makeHandle(0x4dffa6, scene, exteriorPos);
   const doorwayMarker = makeHandle(0x4dc8ff, scene, doorway);
 
-  const setVisible = (id: '(none)' | 'exterior' | 'doorway'): void => {
-    exteriorMarker.visible = id === 'exterior';
-    doorwayMarker.visible = id === 'doorway';
-  };
-
-  const hideAll = (): void => {
-    exteriorMarker.visible = false;
-    doorwayMarker.visible = false;
-  };
-
-  // Last-seen marker positions for direction attribution. If the marker
-  // moved between ticks, the gizmo dragged it; if it didn't move but the
-  // vector differs, the vector was mutated externally.
-  const lastExteriorMarker = exteriorMarker.position.clone();
-  const lastDoorwayMarker = doorwayMarker.position.clone();
-
-  const syncPair = (marker: Mesh, vector: Vector3, lastMarker: Vector3): void => {
-    if (!marker.position.equals(lastMarker)) {
-      // Marker drag wins — push to vector.
-      vector.copy(marker.position);
-    } else if (!vector.equals(marker.position)) {
-      // External vector mutation (e.g. saveCurrentAsDoorway) — pull to marker.
-      marker.position.copy(vector);
-    }
-    lastMarker.copy(marker.position);
-  };
-
   const syncToSources = (): void => {
-    syncPair(exteriorMarker, exteriorPos, lastExteriorMarker);
-    syncPair(doorwayMarker, doorway, lastDoorwayMarker);
+    if (!exteriorMarker.position.equals(exteriorPos)) exteriorMarker.position.copy(exteriorPos);
+    if (!doorwayMarker.position.equals(doorway)) doorwayMarker.position.copy(doorway);
   };
 
-  return { exteriorMarker, doorwayMarker, setVisible, hideAll, syncToSources };
+  return { exteriorMarker, doorwayMarker, syncToSources };
 }
