@@ -4,6 +4,107 @@ Realtime web scene for the Like Every Cloud project — interior of a Chad casse
 
 three.js + Vite + TypeScript.
 
+---
+
+## First-time setup (no technical background needed)
+
+If you've never used GitHub, Terminal, or Node before, follow these steps in order. You only do most of them once. Skip ahead to **Run** below if you already have everything installed.
+
+### Step 1 — Install GitHub Desktop
+
+GitHub Desktop is a free app that copies code from the internet onto your computer.
+
+1. Open a web browser and go to **<https://desktop.github.com>**.
+2. Click **Download for macOS** (or **Download for Windows** if you're on Windows).
+3. Open the file your browser downloaded.
+   - **Mac:** drag the GitHub Desktop icon into your **Applications** folder.
+   - **Windows:** double-click the installer and click through the prompts.
+4. Open GitHub Desktop. The first time you launch it, it asks you to sign in to GitHub. If you don't have a GitHub account, click the link to create one (it's free, just an email + password).
+
+### Step 2 — Install Node.js
+
+Node.js is the program that actually runs this project's code. It comes with `npm`, which is a tool that downloads libraries.
+
+1. Go to **<https://nodejs.org>**.
+2. Click the big green button labeled **LTS** (this is the stable version).
+3. Open the file your browser downloaded and click through the installer using all the defaults. Restart your computer if it asks.
+
+### Step 3 — Download the project with GitHub Desktop
+
+1. Open GitHub Desktop.
+2. From the menu bar, choose **File → Clone Repository…** (Mac: ⌘⇧O).
+3. Click the **URL** tab in the dialog that appears.
+4. In the URL box, paste:
+   ```
+   https://github.com/malmutairiturki/Like-Every-Cloud
+   ```
+5. Under **Local Path**, GitHub Desktop suggests a folder like `Documents/GitHub/Like-Every-Cloud`. Leave it as-is (you'll need to know this path in a moment).
+6. Click **Clone**. Wait for the progress bar to finish — it might take a minute.
+
+### Step 4 — Open Terminal
+
+Terminal is a text window where you type commands to your computer.
+
+- **Mac:** press **⌘ Space** to open Spotlight, type `Terminal`, and press **Return**. A window with a blinking cursor opens.
+- **Windows:** open the **Start menu**, type `PowerShell`, and press Enter.
+
+### Step 5 — Move into the project folder
+
+You need to tell Terminal which folder to work in.
+
+1. Type these two letters and a space: `cd ` ← **with a space after, and do NOT press Return yet.**
+2. Open **Finder** (Mac) or **File Explorer** (Windows) and find the folder GitHub Desktop made — usually `Documents/GitHub/Like-Every-Cloud`.
+3. **Drag that folder onto the Terminal window.** Terminal will paste the full path for you automatically.
+4. Now press **Return**. Your Terminal prompt should now show `Like-Every-Cloud` somewhere in the line — that means you're inside the project.
+
+### Step 6 — Install the project's dependencies
+
+Type this and press **Return**:
+
+```bash
+npm install
+```
+
+This downloads all the libraries the project needs. The first time, it takes 1–3 minutes and prints a lot of text. You only need to do this once (or again whenever the project is updated and someone tells you to).
+
+### Step 7 — Start the project
+
+Type this and press **Return**:
+
+```bash
+npm run dev
+```
+
+After a moment, you'll see a line that says something like:
+
+```
+  ➜  Local:   http://localhost:5173/
+```
+
+### Step 8 — Open it in your browser
+
+Open Chrome, Safari, or Firefox and go to:
+
+```
+http://localhost:5173
+```
+
+The scene loads. The page boots **muted** — click the mute button in the bottom-left pill to start audio.
+
+### Stopping and restarting
+
+- **To stop the project:** click back on the Terminal window and press **Control + C** (the letter C, with the Control key — same on Mac and Windows). The prompt comes back.
+- **To start it again later:** open Terminal, drag the project folder onto it after typing `cd `, press Return, then type `npm run dev` and press Return. You can skip `npm install` unless someone tells you the project's dependencies changed.
+
+### If something goes wrong
+
+- **`command not found: npm`** — Node.js isn't installed (or didn't finish installing). Redo Step 2 and restart Terminal.
+- **`command not found: cd`** — extremely unlikely; you probably typed something else. Try again.
+- **The browser says "can't connect"** — make sure Terminal is still running and showing `Local: http://localhost:5173/`. If it's not, redo Step 7.
+- **Port 5173 already in use** — you already have the project running in another Terminal window. Close that one (Control + C in it) and try again.
+
+---
+
 ## Run
 
 ```bash
