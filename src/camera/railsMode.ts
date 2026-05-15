@@ -25,6 +25,13 @@ export class RailsMode implements CameraMode {
   speed: number;
   smoothing = 0.1;
   private readonly closed: boolean;
+  // Active = between init() and dispose(). Multiple RailsMode instances share
+  // one camera (interior-walk + interior-orbit + freeform), so an inactive
+  // mode must NOT mutate camera.position — otherwise applying saved tunables
+  // (e.g. `t: 0` on the inactive interior modes at boot) would teleport the
+  // active mode's camera onto the rails. Mirrors FreeformMode's
+  // `if (this.controls)` guard around its setters.
+  private active = false;
 
   constructor(
     private camera: PerspectiveCamera,
@@ -45,15 +52,19 @@ export class RailsMode implements CameraMode {
   set t(v: number) {
     this._t = this.clampT(v);
     this.targetT = this._t;
-    this.applyAt(this._t);
+    // Only drive the shared camera when we're the active mode. Setting `t`
+    // on a parked mode just stashes the value for next init().
+    if (this.active) this.applyAt(this._t);
   }
 
   init(): void {
+    this.active = true;
     this.applyAt(this._t);
     this.domElement.addEventListener('wheel', this.handleWheel, { passive: false });
   }
 
   update(): void {
+    if (!this.active) return;
     let diff = this.targetT - this._t;
     // For a closed loop, wrap diff into the shorter direction so the camera
     // doesn't lerp the long way across the seam (e.g. 0.95 -> 0.05 should
@@ -69,6 +80,7 @@ export class RailsMode implements CameraMode {
   }
 
   dispose(): void {
+    this.active = false;
     this.domElement.removeEventListener('wheel', this.handleWheel);
   }
 

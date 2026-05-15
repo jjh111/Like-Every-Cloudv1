@@ -303,15 +303,46 @@ export async function start(container: HTMLElement): Promise<void> {
   // Save flow uses getWorldPosition(), so moving the group bakes the
   // translation into each member's stored position on the next save. The
   // group itself returns to identity on reload (re-built from manifest).
+  //
+  // Hierarchy preference: when a multi-placement hero has an `#all` wrapper
+  // AND all its placements agree on group_id, we attach the `#all` group to
+  // the cross-group (not its individual children). That preserves the
+  // per-hero "(set)" handle — picking `hero_cassette_raw_a (set)` from the
+  // dropdown still drags all of that hero's cassettes as one. Yanking the
+  // children out instead would orphan `#all` and the (set) handle would
+  // drag nothing.
   {
     const byGroupId = new Map<string, Object3D[]>();
-    for (const obj of heroLookup.values()) {
-      const gid = obj.userData?.group_id;
-      if (typeof gid === 'string' && gid.length > 0) {
-        if (!byGroupId.has(gid)) byGroupId.set(gid, []);
-        byGroupId.get(gid)!.push(obj);
+    const consumed = new Set<Object3D>();
+
+    // Pass 1: #all wrappers whose children unanimously agree on a group_id.
+    for (const [id, obj] of heroLookup) {
+      if (!id.endsWith('#all')) continue;
+      const children = obj.children;
+      if (children.length === 0) continue;
+      const gids = new Set<string>();
+      for (const c of children) {
+        const gid = c.userData?.group_id;
+        if (typeof gid === 'string' && gid.length > 0) gids.add(gid);
+        else { gids.clear(); break; }  // any disagreement disqualifies the wrapper
       }
+      if (gids.size !== 1) continue;
+      const gid = gids.values().next().value as string;
+      if (!byGroupId.has(gid)) byGroupId.set(gid, []);
+      byGroupId.get(gid)!.push(obj);
+      // Mark children as consumed so pass 2 doesn't double-attach them.
+      for (const c of children) consumed.add(c);
     }
+
+    // Pass 2: individual instances not already covered by an #all wrapper.
+    for (const obj of heroLookup.values()) {
+      if (consumed.has(obj)) continue;
+      const gid = obj.userData?.group_id;
+      if (typeof gid !== 'string' || gid.length === 0) continue;
+      if (!byGroupId.has(gid)) byGroupId.set(gid, []);
+      byGroupId.get(gid)!.push(obj);
+    }
+
     for (const [groupId, members] of byGroupId) {
       const groupObj = new Group();
       groupObj.userData.hero_id = `group:${groupId}`;
@@ -441,59 +472,71 @@ export async function start(container: HTMLElement): Promise<void> {
   });
   engine.arm();
 
-  // ── Gizmos (compound translate + rotate) ────────────────────────────
-  const tcMove = new TransformControls(camera, renderer.domElement);
-  tcMove.setMode('translate');
-  const tcRotate = new TransformControls(camera, renderer.domElement);
-  tcRotate.setMode('rotate');
-  // Larger so rotation rings sit outside translate arrows and don't fight
-  // for pointer hits.
-  tcRotate.setSize(1.25);
-  const helperMove = tcMove.getHelper();
-  const helperRotate = tcRotate.getHelper();
-  helperMove.visible = false;
-  helperRotate.visible = false;
-  tcMove.enabled = false;
-  tcRotate.enabled = false;
-  scene.add(helperMove);
-  scene.add(helperRotate);
+  // ── Gizmo (single, mode-toggled) ────────────────────────────────────
+  // One TransformControls instance, switched between translate / rotate via
+  // W / E keys (three.js convention). The previous two-instance "compound"
+  // setup had translate arrows and rotate rings overlapping at the object
+  // origin — clicking near a translate arrow tip often caught the
+  // perpendicular rotate ring, so "translate" silently became "rotate
+  // around the bottom origin". Single mode + explicit toggle eliminates the
+  // ambiguity.
+  //
+  // `lockedToTranslate` keeps the camera/shaft markers translate-only —
+  // rotating them is meaningless (they're position-only handles) and the
+  // W/E keys are no-ops while locked.
+  const tc = new TransformControls(camera, renderer.domElement);
+  tc.setMode('translate');
+  const helper = tc.getHelper();
+  helper.visible = false;
+  tc.enabled = false;
+  scene.add(helper);
   const onGizmoDrag = (event: unknown): void => {
     const dragging = (event as { value: boolean }).value;
     const fm = activeCamera as unknown as { controls?: { enabled: boolean } };
     if (fm.controls) fm.controls.enabled = !dragging;
   };
-  tcMove.addEventListener('dragging-changed', onGizmoDrag);
-  tcRotate.addEventListener('dragging-changed', onGizmoDrag);
+  tc.addEventListener('dragging-changed', onGizmoDrag);
 
   type GizmoMode = 'compound' | 'translate-only';
+  let lockedToTranslate = false;
   const attachGizmo = (obj: Object3D | null, mode: GizmoMode = 'compound'): void => {
     if (!obj) {
-      tcMove.detach();
-      tcRotate.detach();
-      helperMove.visible = false;
-      helperRotate.visible = false;
-      tcMove.enabled = false;
-      tcRotate.enabled = false;
+      tc.detach();
+      helper.visible = false;
+      tc.enabled = false;
       return;
     }
-    tcMove.attach(obj);
-    helperMove.visible = true;
-    tcMove.enabled = true;
-    if (mode === 'compound') {
-      tcRotate.attach(obj);
-      helperRotate.visible = true;
-      tcRotate.enabled = true;
-    } else {
-      tcRotate.detach();
-      helperRotate.visible = false;
-      tcRotate.enabled = false;
-    }
+    tc.attach(obj);
+    // Always start in translate so "pick hero → drag" is the default action.
+    // User can press E to switch to rotate when needed.
+    tc.setMode('translate');
+    helper.visible = true;
+    tc.enabled = true;
+    lockedToTranslate = mode === 'translate-only';
   };
-  const getGizmoTarget = (): Object3D | null => (tcMove.object as Object3D | null) ?? null;
+  const getGizmoTarget = (): Object3D | null => (tc.object as Object3D | null) ?? null;
+
+  // Keyboard mode toggle: W = translate, E = rotate. Only fires while the
+  // gizmo is attached and the user isn't typing in a text field. Locked
+  // targets (markers) ignore the toggle.
+  window.addEventListener('keydown', (e) => {
+    if (!tc.object) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const tag = (e.target as HTMLElement | null)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement | null)?.isContentEditable) return;
+    if (e.key === 'w' || e.key === 'W') {
+      e.preventDefault();
+      tc.setMode('translate');
+    } else if (e.key === 'e' || e.key === 'E') {
+      if (lockedToTranslate) return;
+      e.preventDefault();
+      tc.setMode('rotate');
+    }
+  });
 
   // Undo/redo for gizmo edits. Captures pre/post matrices on every drag.
   // Cmd/Ctrl-Z to undo, Cmd/Ctrl-Shift-Z (or Cmd-Y) to redo.
-  const gizmoUndo = createGizmoUndo({ controls: [tcMove, tcRotate] });
+  const gizmoUndo = createGizmoUndo({ controls: [tc] });
 
   /** Park the freeform orbit pivot on the camera's forward ray so the next
    *  init() is a visual no-op — preserves the user's current view when
@@ -672,8 +715,7 @@ export async function start(container: HTMLElement): Promise<void> {
     camera,
     renderer,
     heroLookup,
-    tcMove,
-    tcRotate,
+    tc,
     get gizmoTarget() { return getGizmoTarget(); },
     audio,
     atmospheres,
