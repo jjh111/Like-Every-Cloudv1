@@ -18,6 +18,18 @@ assets/
 Concepts - Draft Text/
 LIKE EVERY CLOUD concept document.pdf
 
-# GLB exports — too large for git until optimized. Re-evaluate after KTX2.
+# GLB exports — wildcard-ignored by default; everything actually consumed by
+# the runtime is whitelisted below. When you ship a new hero, add its
+# manifest entry AND add a `!` line here.
+# Pre-KTX2 these are still chunky (~40 MB total used) but all individual
+# files are well under GitHub's per-file warning threshold. Re-audit after
+# the texture compression pass in Tier 2.
 public/scene/*.glb
+!public/scene/shared.glb
 public/heroes/*.glb
+!public/heroes/hero_boombox.glb
+!public/heroes/hero_cassette_case.glb
+!public/heroes/hero_cassette_raw_a.glb
+!public/heroes/hero_cassette_raw_b.glb
+!public/heroes/hero_chair.glb
+!public/heroes/hero_table.glb

@@ -32,6 +32,7 @@ import { createTracksBar } from './ui/tracksBar';
 import { createHeroStatePanel, buildHeroDropdownMap } from './ui/heroStatePanel';
 import { createHoverLabel } from './ui/hoverLabel';
 import { createViewToggle } from './ui/viewToggle';
+import { createDevToggle } from './ui/devToggle';
 
 interface CameraBookmark { position: [number, number, number]; target: [number, number, number] }
 
@@ -759,6 +760,10 @@ export async function start(container: HTMLElement): Promise<void> {
   createAudioControls(audio);
   createTracksBar(audio, AUDIO_ASSETS);
   createViewToggle(getView, toggleView);
+
+  // Small ⚙ button top-right in demo view → opens dev view via ?dev=1.
+  // Not shown in dev view because lil-gui already lives top-right there.
+  if (!devMode) createDevToggle(false);
 
   // Camera anchor markers (green = exterior pose, cyan = doorway) are
   // authoring aids — hide them on the demo view so directors don't see
