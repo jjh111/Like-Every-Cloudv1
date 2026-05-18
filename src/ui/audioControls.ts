@@ -29,11 +29,12 @@ export function createAudioControls(audio: AudioManager): void {
     'background: none',
     'border: 1px solid rgba(255,255,255,0.25)',
     'color: #ddd',
-    'padding: 4px 10px',
+    'padding: 6px 12px',           // touch-friendly target
     'border-radius: 999px',
     'cursor: pointer',
     'font: inherit',
     'min-width: 92px',
+    'touch-action: manipulation',
   ].join('; ');
   const renderBtn = () => {
     muteBtn.textContent = audio.muted ? '🔇 muted' : '🔊 sound on';

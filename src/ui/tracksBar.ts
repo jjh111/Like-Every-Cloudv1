@@ -44,7 +44,7 @@ export function createTracksBar(audio: AudioManager, assets: AudioAsset[]): void
   const trackChips = new Map<string, HTMLDivElement>();
   for (const a of assets) {
     const chip = document.createElement('div');
-    chip.style.cssText = 'padding: 2px 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.15); transition: background 120ms, color 120ms, border-color 120ms; cursor: pointer;';
+    chip.style.cssText = 'padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.15); transition: background 120ms, color 120ms, border-color 120ms; cursor: pointer; touch-action: manipulation; user-select: none;';
     chip.textContent = a.id;
     chip.title = `audition ${a.id} on sfx channel`;
     chip.addEventListener('click', async () => {

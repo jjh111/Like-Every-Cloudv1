@@ -11,8 +11,8 @@ export function createDevToggle(currentlyDev: boolean): void {
     'position: fixed',
     'top: 16px',
     'right: 16px',
-    'width: 32px',
-    'height: 32px',
+    'width: 36px',                  // slightly larger touch target
+    'height: 36px',
     'padding: 0',
     'background: rgba(15, 15, 15, 0.55)',
     'color: #ddd',
@@ -27,11 +27,15 @@ export function createDevToggle(currentlyDev: boolean): void {
     'align-items: center',
     'justify-content: center',
     'opacity: 0.7',
+    'touch-action: manipulation',   // no 300ms iOS tap delay
+    'transition: opacity 120ms ease',
   ].join('; ');
   btn.textContent = currentlyDev ? '×' : '⚙';
 
-  btn.addEventListener('mouseenter', () => { btn.style.opacity = '1'; });
-  btn.addEventListener('mouseleave', () => { btn.style.opacity = '0.7'; });
+  // Pointer events fire for both mouse hover AND touch contact — so the
+  // visual emphasis works for both input modes.
+  btn.addEventListener('pointerenter', () => { btn.style.opacity = '1'; });
+  btn.addEventListener('pointerleave', () => { btn.style.opacity = '0.7'; });
 
   btn.addEventListener('click', () => {
     const url = new URL(window.location.href);

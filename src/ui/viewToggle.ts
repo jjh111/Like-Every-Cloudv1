@@ -35,6 +35,7 @@ export function createViewToggle(
     'min-width: 150px',
     'text-align: center',
     'pointer-events: auto',
+    'touch-action: manipulation',   // no 300ms iOS tap delay, no double-tap zoom
     'transition: background 120ms ease, border-color 120ms ease, transform 120ms ease',
   ];
   btn.style.cssText = baseCss.join('; ');
