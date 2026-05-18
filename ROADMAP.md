@@ -10,7 +10,7 @@ Status legend: ⏳ in progress · ✅ done · 🔲 planned · ⏸ deferred
 
 | Item | Why | Status |
 |---|---|---|
-| Deploy to **Vercel** / **Netlify** | Directors get a live link; auto-deploys on push to `main`; settles the "where does this live" question | ⏸ deferred — using repo for now |
+| Deploy to **Cloudflare Pages** | Directors get a live link; auto-deploys on push to `main`; settles the "where does this live" question. Picked Cloudflare over Vercel/Netlify for unlimited bandwidth on the free tier + no `*.vercel.app` branding on the URL. | ⏳ repo-side prep done (`.nvmrc`, clean `public/`, build verified); dashboard connect pending |
 | **Demo-quality first-load** | Loading overlay so directors don't stare at a blank canvas during the 3–5s asset pull | 🔲 |
 | **Read-only viewer mode** | `?dev=1` gate hides the dev panel + state radio panel + camera-handle markers so the directors link looks like a polished thing, not a Blender debugger | 🔲 |
 
@@ -111,6 +111,7 @@ Status legend: ⏳ in progress · ✅ done · 🔲 planned · ⏸ deferred
 
 ## Recent shipped work (so we don't forget)
 
+- **2026-05-18** — Cloudflare Pages prep: added `.nvmrc` pinning Node 20 for the build environment; removed unused hero GLBs (`hero_amp`, `hero_cassette`, `hero_monoblock_chair`, `hero_speaker`) from `public/heroes/` so they don't ship to the host; stripped `.DS_Store` from `public/`; README documents the dashboard connect steps and the redeploy-on-push behavior. **Total `dist/` is now ~31 MB** (was 36 MB), audio placeholders accounting for ~23 MB of that.
 - **2025-05-15** — Demo-mode polish + asset compression: `?dev=1` query string gates the dev/authoring surfaces (lil-gui panel, state radios, scene markers); top-center "go inside / outside" pill + top-right ⚙ dev-toggle for the demo view; loading overlay over the sky gradient; one-time controls hint chip; runtime assets committed to git (6 heroes + shared.glb whitelisted via `.gitignore` `!` exceptions); **`npm run compress` reduced the asset bundle 91.6% (42.6 MB → 3.6 MB)** via Draco mesh + WebP texture pipeline.
 - **2025-05-15** — Cleanup pass: gizmo purity (single-mode + W/E toggle + translate-purity watchdog), camera-save UX (read-only markers + two clear save buttons), RailsMode boot-pose fix, doorway off-path guard, cross-hero group prefers `#all` wrappers, DoubleSide on hero materials, README first-time setup walkthrough, `hero_table` and `hero_chair` re-exported with modifier-baked geometry + normalized empty origins.
 - **earlier** — Tier 1+2 architecture refactor: bookmarks, gizmo undo, hover labels, data-driven state music, hero/shared GLB pipeline, dev-panel save flows, wall cull, camera handles.

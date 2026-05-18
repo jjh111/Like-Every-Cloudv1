@@ -4,6 +4,8 @@ Realtime web scene for the Like Every Cloud project — interior of a Chad casse
 
 three.js + Vite + TypeScript.
 
+**Live demo:** _(URL will land here after the first Cloudflare Pages deploy — see Hosting below)_
+
 ---
 
 ## First-time setup (no technical background needed)
@@ -121,6 +123,32 @@ Open http://localhost:5173. The page boots **muted**; click the mute button in t
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run preview` — serve the built `dist/`
 - `npm run compress` — re-compresses every runtime GLB in place (Draco mesh + WebP textures). Run after re-exporting from Blender — drops the bundle ~91%. `npm run compress hero_table` runs on just one file.
+
+## Hosting
+
+The repo is wired to deploy to **Cloudflare Pages**. Every push to `main` triggers an automatic rebuild + deploy — directors visit the URL, no clone or install needed on their side.
+
+### First-time setup (one-time, per Cloudflare account)
+
+1. Sign in to **<https://dash.cloudflare.com>** (the GitHub-OAuth option uses no extra credentials).
+2. Left nav → **Workers & Pages** → **Pages** tab → **Connect to Git**.
+3. Authorize Cloudflare to read this repo (only this repo — don't grant org-wide unless that's what you want).
+4. Build configuration:
+   - **Framework preset:** Vite
+   - **Build command:** `npm run build`
+   - **Build output directory:** `dist`
+   - **Root directory:** _(leave blank — repo root)_
+   - **Environment variables:** none required
+5. **Save and Deploy.** First build takes ~2 minutes. After it succeeds you get a URL like `like-every-cloud.pages.dev`.
+6. Add the URL to the **Live demo** line at the top of this README and commit.
+
+### Subsequent deploys
+
+Just push to `main`. Cloudflare watches the branch and redeploys automatically — usually live within ~90 seconds. Pull requests get their own preview URL so unfinished work can be reviewed before merging.
+
+### Hand-off to a new Cloudflare account
+
+If directors want their own copy on their own Cloudflare account: fork the repo, repeat the steps above pointing at the fork. No code changes needed.
 
 ## What you see
 
