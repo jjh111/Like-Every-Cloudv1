@@ -176,6 +176,8 @@ For reference (so this can be re-set-up from scratch or replicated on another Cl
 | Root directory | _(blank — repo root)_ |
 | Environment variables | none — Node version is set by `.nvmrc` (Node 20) |
 
+The repo also includes a [`wrangler.jsonc`](wrangler.jsonc) at the root. Cloudflare's "Vite" framework preset would otherwise auto-configure a Workers + Vite integration that requires Vite 6+ and fails our build at the deploy step (we're on Vite 5). `wrangler.jsonc` overrides the auto-config and tells Cloudflare "just deploy `./dist` as static assets, no Worker script needed" — which matches what this project actually is. Leave it alone unless you're moving to dynamic server-side logic.
+
 ### Hand-off to the client (later)
 
 When the client wants the demo URL under *their* Cloudflare account instead of John's:

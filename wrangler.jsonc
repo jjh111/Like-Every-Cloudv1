@@ -1,0 +1,17 @@
+// Cloudflare deploy config. Without this file, Cloudflare's "Vite framework
+// preset" tries to auto-configure a Workers + Vite integration that requires
+// Vite 6+, and fails our build at the deploy step.
+//
+// We don't actually need any of that — this project is pure static assets
+// (HTML + JS bundle + GLB / WebP / audio files), no server logic. This config
+// declares exactly that: deploy whatever `npm run build` produces in ./dist
+// to Cloudflare's edge as static files. No Worker script.
+//
+// Reference: https://developers.cloudflare.com/workers/static-assets/
+{
+  "name": "like-every-cloud",
+  "compatibility_date": "2026-05-18",
+  "assets": {
+    "directory": "./dist"
+  }
+}
