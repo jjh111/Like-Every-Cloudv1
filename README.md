@@ -123,32 +123,68 @@ Open http://localhost:5173. The page boots **muted**; click the mute button in t
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run preview` — serve the built `dist/`
 - `npm run compress` — re-compresses every runtime GLB in place (Draco mesh + WebP textures). Run after re-exporting from Blender — drops the bundle ~91%. `npm run compress hero_table` runs on just one file.
+- `npm run deploy` — pushes `main` to both remotes (`origin` = client's repo, `fork` = the Cloudflare-watched personal fork). See the **Hosting** section below for the topology.
 
 ## Hosting
 
-The repo is wired to deploy to **Cloudflare Pages**. Every push to `main` triggers an automatic rebuild + deploy — directors visit the URL, no clone or install needed on their side.
+The site is built by **Cloudflare Pages** on every push and served at `https://<project>.pages.dev`. Free tier: unlimited bandwidth, ~25 MB per file max, ~500 MB total. Our `dist/` is ~31 MB so we're well under.
 
-### First-time setup (one-time, per Cloudflare account)
+### Topology (current)
 
-1. Sign in to **<https://dash.cloudflare.com>** (the GitHub-OAuth option uses no extra credentials).
-2. Left nav → **Workers & Pages** → **Pages** tab → **Connect to Git**.
-3. Authorize Cloudflare to read this repo (only this repo — don't grant org-wide unless that's what you want).
-4. Build configuration:
-   - **Framework preset:** Vite
-   - **Build command:** `npm run build`
-   - **Build output directory:** `dist`
-   - **Root directory:** _(leave blank — repo root)_
-   - **Environment variables:** none required
-5. **Save and Deploy.** First build takes ~2 minutes. After it succeeds you get a URL like `like-every-cloud.pages.dev`.
-6. Add the URL to the **Live demo** line at the top of this README and commit.
+Because Cloudflare Pages' GitHub integration installs in the *repo owner's* GitHub account, and `malmutairiturki/Like-Every-Cloud` is owned by the client, we host from a **personal fork**:
 
-### Subsequent deploys
+```
+origin  →  github.com/malmutairiturki/Like-Every-Cloud   (canonical / client-owned)
+fork    →  github.com/jjh111/Like-Every-Cloud            (personal — Cloudflare Pages watches this)
+```
 
-Just push to `main`. Cloudflare watches the branch and redeploys automatically — usually live within ~90 seconds. Pull requests get their own preview URL so unfinished work can be reviewed before merging.
+Both remotes are configured in any clone made before this section was written; new clones need step 2 of "Cloning fresh" below.
 
-### Hand-off to a new Cloudflare account
+### Deploying
 
-If directors want their own copy on their own Cloudflare account: fork the repo, repeat the steps above pointing at the fork. No code changes needed.
+```bash
+npm run deploy
+```
+
+That's the whole loop. It does `git push origin main && git push fork main` — origin keeps the client's repo in sync (PRs, discussion, source of truth) and fork triggers a Cloudflare rebuild (~90s to live).
+
+Pull requests on the fork get their own preview URL (`https://<branch>.like-every-cloud.pages.dev`) — useful for "show this without merging".
+
+### Cloning fresh
+
+If you're cloning the repo for the first time (or onto a new machine):
+
+```bash
+git clone https://github.com/malmutairiturki/Like-Every-Cloud.git
+cd Like-Every-Cloud
+git remote add fork https://github.com/jjh111/Like-Every-Cloud.git
+```
+
+That second line is the only manual step — without it `npm run deploy` will fail with "fatal: 'fork' does not appear to be a git repository".
+
+### Cloudflare Pages dashboard config
+
+For reference (so this can be re-set-up from scratch or replicated on another Cloudflare account):
+
+| Field | Value |
+|---|---|
+| Repository | `jjh111/Like-Every-Cloud` (the fork) |
+| Production branch | `main` |
+| Framework preset | Vite |
+| Build command | `npm run build` |
+| Build output directory | `dist` |
+| Root directory | _(blank — repo root)_ |
+| Environment variables | none — Node version is set by `.nvmrc` (Node 20) |
+
+### Hand-off to the client (later)
+
+When the client wants the demo URL under *their* Cloudflare account instead of John's:
+
+1. Client signs in to their own Cloudflare dashboard.
+2. Workers & Pages → Pages → Connect to Git.
+3. They authorize Cloudflare for `malmutairiturki/Like-Every-Cloud` directly (no fork needed — they own it).
+4. Same build config as the table above, repo set to `malmutairiturki/Like-Every-Cloud` instead of the fork.
+5. Once it goes live, John's fork-based deploy can be removed (the fork itself can stay — useful as a personal sandbox).
 
 ## What you see
 
