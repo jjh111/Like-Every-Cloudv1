@@ -42,12 +42,14 @@
         pointer-events: none;
       }
       #lec-loading.hidden { opacity: 0; }
-      #lec-loading .lec-title {
-        font-size: 22px;
-        font-weight: 300;
-        letter-spacing: 0.15em;
-        text-transform: uppercase;
-        color: #3a2f22;
+      #lec-loading .lec-logo {
+        /* Logo is a wordmark (~1.8:1). Width-based sizing with auto height
+           lets the SVG's viewBox decide the aspect — no squashing if the
+           logo file is ever swapped for a different aspect. */
+        width: 320px;
+        height: auto;
+        max-width: 70vw;
+        user-select: none;
       }
       #lec-loading .lec-spinner {
         width: 28px;
@@ -65,7 +67,7 @@
   <body>
     <div id="app"></div>
     <div id="lec-loading">
-      <div class="lec-title">Like Every Cloud</div>
+      <img class="lec-logo" src="/like-every-cloud.svg" alt="Like Every Cloud" />
       <div class="lec-spinner"></div>
     </div>
     <script type="module" src="/src/main.ts"></script>

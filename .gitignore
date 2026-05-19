@@ -33,3 +33,15 @@ public/heroes/*.glb
 !public/heroes/hero_cassette_raw_b.glb
 !public/heroes/hero_chair.glb
 !public/heroes/hero_table.glb
+# Sound-emitting heroes — placeholders today (procedural spheres from
+# scripts/make-placeholder-heroes.mjs), real GLBs to drop in later. Their
+# manifest entry + states.json `heroAudio` config stays the same when the
+# real geometry lands.
+!public/heroes/hero_fan.glb
+!public/heroes/hero_generator.glb
+!public/heroes/hero_motorcycle.glb
+!public/heroes/hero_sewing.glb
+
+# Encoded SFX/ambient audio (output of `npm run compress-audio`). Sources
+# live in `Working - gitignore/Sounds/` which is git-ignored above.
+!public/audio/sfx/**/*.m4a

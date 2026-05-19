@@ -98,6 +98,54 @@
           "userData": { "group_id": "shop_set" }
         }
       ]
+    },
+    {
+      "id": "hero_sewing",
+      "url": "/heroes/hero_sewing.glb",
+      "interactive": true,
+      "placements": [
+        {
+          "state": "both",
+          "position": [1, 0.706, -0.743],
+          "userData": { "group_id": "shop_set", "is_placeholder": true }
+        }
+      ]
+    },
+    {
+      "id": "hero_fan",
+      "url": "/heroes/hero_fan.glb",
+      "interactive": true,
+      "placements": [
+        {
+          "state": "both",
+          "position": [0, 1.8, -2.5],
+          "userData": { "group_id": "shop_set", "is_placeholder": true }
+        }
+      ]
+    },
+    {
+      "id": "hero_motorcycle",
+      "url": "/heroes/hero_motorcycle.glb",
+      "interactive": true,
+      "placements": [
+        {
+          "state": "both",
+          "position": [3, 0.3, 1],
+          "userData": { "is_placeholder": true }
+        }
+      ]
+    },
+    {
+      "id": "hero_generator",
+      "url": "/heroes/hero_generator.glb",
+      "interactive": true,
+      "placements": [
+        {
+          "state": "both",
+          "position": [0.91, 0.3, 0.254],
+          "userData": { "is_placeholder": true }
+        }
+      ]
     }
   ]
 }

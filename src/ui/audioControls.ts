@@ -1,15 +1,20 @@
 import type { AudioManager } from '../audio/audioManager';
 
-// Bottom-left floating pill: mute toggle + master volume. Mute starts on; the
-// first click both unmutes and resumes the AudioContext (first-gesture
-// requirement). External mutations (dev panel slider) flow back through the
-// poll loop so the UI stays in sync.
+// Bottom-center floating pill (sits above the tracks bar): mute toggle +
+// master volume. Mute starts on; the first click both unmutes and resumes
+// the AudioContext (first-gesture requirement). External mutations (dev
+// panel slider) flow back through the poll loop so the UI stays in sync.
+//
+// Co-located with the tracks bar so the entire audio cluster lives at the
+// bottom center of the viewport — `bottom` offset matches the tracks bar's
+// expected height + a small gap, keeping them visually grouped.
 export function createAudioControls(audio: AudioManager): void {
   const wrapper = document.createElement('div');
   wrapper.style.cssText = [
     'position: fixed',
-    'bottom: 16px',
-    'left: 16px',
+    'bottom: 86px',
+    'left: 50%',
+    'transform: translateX(-50%)',
     'display: flex',
     'align-items: center',
     'gap: 10px',

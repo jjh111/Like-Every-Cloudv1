@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "compress": "node scripts/compress-glbs.mjs",
+    "compress-audio": "node scripts/compress-audio.mjs",
+    "make-placeholder-heroes": "node scripts/make-placeholder-heroes.mjs",
     "deploy": "git push origin main && git push fork main"
   },
   "dependencies": {

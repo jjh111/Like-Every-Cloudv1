@@ -137,9 +137,51 @@ function cameraWriter(): Plugin {
   };
 }
 
+// Same pattern, pinned to public/states.json. Carries per-state music +
+// per-hero ambient bed authoring (volume, on/off via presence in heroAudio).
+function statesWriter(): Plugin {
+  return {
+    name: 'lec-states-writer',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use('/__lec/save-states', (req, res, next) => {
+        if (req.method !== 'POST') {
+          next();
+          return;
+        }
+        let body = '';
+        req.on('data', (chunk: Buffer) => { body += chunk.toString('utf8'); });
+        req.on('end', () => {
+          try {
+            const parsed = JSON.parse(body) as { past?: unknown; present?: unknown };
+            if (!parsed || (typeof parsed.past !== 'object' && typeof parsed.present !== 'object')) {
+              res.statusCode = 400;
+              res.end('expected { past?, present? }');
+              return;
+            }
+            const out = resolve(process.cwd(), 'public/states.json');
+            const trailingNewline = body.endsWith('\n') ? '' : '\n';
+            writeFileSync(out, body + trailingNewline);
+            res.statusCode = 200;
+            res.setHeader('content-type', 'application/json');
+            res.end(JSON.stringify({ saved: out }));
+          } catch (e) {
+            res.statusCode = 400;
+            res.end(String(e));
+          }
+        });
+        req.on('error', () => {
+          res.statusCode = 500;
+          res.end('stream error');
+        });
+      });
+    },
+  };
+}
+
 export default defineConfig({
   publicDir: 'public',
-  plugins: [manifestWriter(), atmosphereWriter(), cameraWriter()],
+  plugins: [manifestWriter(), atmosphereWriter(), cameraWriter(), statesWriter()],
   server: {
     port: 5173,
     open: false,

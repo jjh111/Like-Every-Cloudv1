@@ -30,6 +30,8 @@ import { createGizmoUndo } from './scene/gizmoUndo';
 import { createAudioControls } from './ui/audioControls';
 import { createTracksBar } from './ui/tracksBar';
 import { createHeroStatePanel, buildHeroDropdownMap } from './ui/heroStatePanel';
+import { createHeroAudioMixer } from './ui/heroAudioMixer';
+import { createLogoBadge } from './ui/logoBadge';
 import { createHoverLabel } from './ui/hoverLabel';
 import { createViewToggle } from './ui/viewToggle';
 import { createDevToggle } from './ui/devToggle';
@@ -758,6 +760,10 @@ export async function start(container: HTMLElement): Promise<void> {
   // hero-id hover chip, camera anchor markers) only show under `?dev=1`.
   const toggleView = (): void => setView(getView() === 'exterior' ? 'interior' : 'exterior');
 
+  // Top-left brand badge — present in both demo and dev views. The hero
+  // audio mixer (dev-only) tucks under this when it mounts.
+  createLogoBadge();
+
   createAudioControls(audio);
   createTracksBar(audio, AUDIO_ASSETS);
   createViewToggle(getView, toggleView);
@@ -821,6 +827,18 @@ export async function start(container: HTMLElement): Promise<void> {
       active.dispose();
       active.init(scene);
       debugPanel.refreshHeroDropdown(buildHeroDropdownMap(heroLookup));
+    });
+
+    // Top-left mixer: per-hero ambient bed on/off + per-row volume slider.
+    // Bound to the AudioManager so toggles + slider drags reflect live, and
+    // to the loaded stateConfig so "save mix" persists what you hear back
+    // into public/states.json.
+    createHeroAudioMixer({
+      audio,
+      state: stateController,
+      heroLookup,
+      initialConfig: stateConfig,
+      saveStatesConfig: (cfg) => saves.saveStatesConfig(cfg),
     });
 
     // Hover label: small floating chip showing the hero_id of whatever's

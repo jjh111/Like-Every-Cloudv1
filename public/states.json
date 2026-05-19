@@ -1,10 +1,19 @@
 {
   "past": {
-    "ambient": "test_music_1",
-    "ambientVolume": 0.6
+    "music": "test_music_1",
+    "musicVolume": 0.6,
+    "heroAudio": {
+      "hero_fan":       { "id": "sfx_fan_oscillation", "volume": 0.35 },
+      "hero_generator": { "id": "sfx_gen_loop",        "volume": 0.3 }
+    }
   },
   "present": {
-    "ambient": "test_music_5",
-    "ambientVolume": 0.5
+    "music": "test_music_5",
+    "musicVolume": 0.5,
+    "heroAudio": {
+      "hero_fan":       { "id": "sfx_fan_oscillation", "volume": 0.25 },
+      "hero_sewing":    { "id": "sfx_sewing_hum",      "volume": 0.5 },
+      "hero_generator": { "id": "sfx_gen_loop",        "volume": 0.3 }
+    }
   }
 }

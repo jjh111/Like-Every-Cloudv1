@@ -3,6 +3,7 @@ import type { CameraMode } from '../camera/cameraMode';
 import type { MorningShaft } from '../atmosphere/morningShaft';
 import type { HeroEntry, HeroPlacement } from '../loaders/heroLoader';
 import type { CullSettings } from '../scene/wallCull';
+import type { StateConfig, StateConfigEntry, HeroAudioBed } from '../state/stateConfig';
 
 // All three save flows share a few invariants:
 //   - dev middleware writes the body verbatim (after JSON.parse validation),
@@ -105,6 +106,43 @@ const formatCameraPositions = (data: CameraSavePayload): string => {
   );
 };
 
+// ── states.json ──────────────────────────────────────────────────────────
+// Per-hero audio bed authoring + per-state background music. Hand-formatted
+// so the heroAudio map stays one-line-per-hero for legibility.
+const formatHeroBed = (bed: HeroAudioBed): string => {
+  const parts: string[] = [`"id": ${JSON.stringify(bed.id)}`];
+  if (bed.volume !== undefined) parts.push(`"volume": ${bed.volume}`);
+  if (bed.loop !== undefined) parts.push(`"loop": ${bed.loop}`);
+  if (bed.channel !== undefined) parts.push(`"channel": ${JSON.stringify(bed.channel)}`);
+  return `{ ${parts.join(', ')} }`;
+};
+const formatStateEntry = (cfg: StateConfigEntry): string => {
+  const lines: string[] = [];
+  if (cfg.music !== undefined) lines.push(`    "music": ${JSON.stringify(cfg.music)}`);
+  if (cfg.musicVolume !== undefined) lines.push(`    "musicVolume": ${cfg.musicVolume}`);
+  const beds = cfg.heroAudio ?? {};
+  const heroIds = Object.keys(beds);
+  if (heroIds.length > 0) {
+    // Align by padding hero-id keys to the longest in this state. Makes the
+    // file scan-readable.
+    const maxLen = Math.max(...heroIds.map((k) => k.length));
+    const bedLines = heroIds.map((heroId) => {
+      const padded = `"${heroId}":`.padEnd(maxLen + 4);
+      return `      ${padded} ${formatHeroBed(beds[heroId])}`;
+    });
+    lines.push('    "heroAudio": {\n' + bedLines.join(',\n') + '\n    }');
+  }
+  return '{\n' + lines.join(',\n') + '\n  }';
+};
+const formatStatesConfig = (config: StateConfig): string => {
+  return (
+    '{\n' +
+    `  "past": ${formatStateEntry(config.past)},\n` +
+    `  "present": ${formatStateEntry(config.present)}\n` +
+    '}\n'
+  );
+};
+
 // ── atmosphere morning-shaft.json ────────────────────────────────────────
 const formatAtmosphereConfig = (cfg: ReturnType<MorningShaft['getCurrentConfig']>): string => {
   const shaftLines = cfg.shafts.map((s) =>
@@ -168,6 +206,10 @@ export interface SaveFlows {
   saveCurrentAsBookmark: (name: string) => Promise<void>;
   /** Remove a bookmark and persist. No-op if it doesn't exist. */
   deleteBookmark: (name: string) => Promise<void>;
+  /** Persist the entire StateConfig (both states) to public/states.json. The
+   *  caller supplies the full config so partial writes can't accidentally
+   *  drop the other state. */
+  saveStatesConfig: (config: StateConfig) => Promise<void>;
 }
 
 export function createSaveFlows(deps: SaveFlowDeps): SaveFlows {
@@ -394,6 +436,22 @@ export function createSaveFlows(deps: SaveFlowDeps): SaveFlows {
     }
   };
 
+  const saveStatesConfig = async (config: StateConfig): Promise<void> => {
+    try {
+      const body = formatStatesConfig(config);
+      const res = await fetch('/__lec/save-states', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      });
+      if (!res.ok) throw new Error(`save responded ${res.status}: ${await res.text()}`);
+      const result = (await res.json()) as { saved?: string };
+      console.log('[states] saved →', result.saved, config);
+    } catch (e) {
+      console.warn('[states] save failed', e);
+    }
+  };
+
   return {
     saveHeroPositions,
     saveShaftConfig,
@@ -401,5 +459,6 @@ export function createSaveFlows(deps: SaveFlowDeps): SaveFlows {
     saveCurrentAsDoorway,
     saveCurrentAsBookmark,
     deleteBookmark,
+    saveStatesConfig,
   };
 }

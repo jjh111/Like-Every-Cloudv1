@@ -314,6 +314,31 @@ export class AudioManager {
     return out;
   }
 
+  /** Set the live gain of a specific playing entry. No-op if (id, channel)
+   *  isn't currently playing. Used by the hero audio mixer to drag a
+   *  bed's volume without interrupting playback. Smooths to the target
+   *  over 80ms so slider drags don't zipper. */
+  setEntryVolume(id: string, channel: AudioChannel, v: number): void {
+    const entry = this.playing.get(keyOf(id, channel));
+    if (!entry) return;
+    entry.gain.gain.cancelScheduledValues(this.ctx.currentTime);
+    entry.gain.gain.setValueAtTime(entry.gain.gain.value, this.ctx.currentTime);
+    entry.gain.gain.linearRampToValueAtTime(v, this.ctx.currentTime + 0.08);
+  }
+
+  /** Read the current target gain of a playing entry, or undefined if not playing. */
+  getEntryVolume(id: string, channel: AudioChannel): number | undefined {
+    const entry = this.playing.get(keyOf(id, channel));
+    return entry?.gain.gain.value;
+  }
+
+  /** True if the (id, channel) tuple is currently playing. Lets the mixer
+   *  reflect actual playback state on each tick, including external mutations
+   *  (state-change rules, explicit stop calls). */
+  isEntryPlaying(id: string, channel: AudioChannel): boolean {
+    return this.playing.has(keyOf(id, channel));
+  }
+
   getChannelVolume(channel: AudioChannel): number {
     return this.channels[channel].gain.value;
   }
