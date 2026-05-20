@@ -320,6 +320,78 @@
       }
       canvas#hero-cloud.grabbing { cursor: grabbing; }
 
+      /* Bottom-right control panel for the hero cloud. Mirrors the sky
+         controls on the left in look + layout, owns size + 4 shape/animation
+         knobs + a reset. */
+      .hero-controls {
+        position: fixed;
+        bottom: 18px;
+        right: 20px;
+        z-index: 2;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 10px 14px 12px;
+        background: rgba(255, 255, 255, 0.62);
+        backdrop-filter: blur(8px);
+        border: 1px solid rgba(255, 255, 255, 0.7);
+        border-radius: 12px;
+        font: 11px/1.3 ui-monospace, Menlo, monospace;
+        color: var(--ink);
+        width: 252px;
+        user-select: none;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+      }
+      .hero-controls .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .hero-controls .name {
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        font-size: 10.5px;
+      }
+      .hero-controls .reset {
+        appearance: none;
+        -webkit-appearance: none;
+        background: transparent;
+        border: 1px solid rgba(58, 47, 34, 0.25);
+        color: var(--ink);
+        padding: 2px 8px;
+        border-radius: 999px;
+        cursor: pointer;
+        font: inherit;
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        opacity: 0.78;
+        transition: background 180ms ease, border-color 180ms ease;
+      }
+      .hero-controls .reset:hover {
+        background: rgba(58, 47, 34, 0.08);
+        border-color: rgba(58, 47, 34, 0.5);
+      }
+      .hero-controls .sliders {
+        display: grid;
+        grid-template-columns: 56px 1fr 36px;
+        gap: 4px 8px;
+        margin-top: 4px;
+        padding-top: 8px;
+        border-top: 1px solid rgba(58, 47, 34, 0.14);
+        align-items: center;
+      }
+      .hero-controls .sliders label { opacity: 0.62; font-size: 10px; }
+      .hero-controls .sliders input[type="range"] {
+        width: 100%;
+        height: 14px;
+        accent-color: var(--ink);
+        cursor: pointer;
+        margin: 0;
+      }
+      .hero-controls .sliders .val { font-size: 10px; opacity: 0.62; text-align: right; }
+
       .footer {
         font: 11px/1.5 ui-monospace, Menlo, monospace;
         color: var(--ink-soft);
@@ -383,6 +455,34 @@
          the brief copy regardless of scroll. Drag from anywhere on its
          body to reposition. -->
     <canvas id="hero-cloud" aria-label="A draggable cloud. Click and drag to move it across the page."></canvas>
+
+    <aside class="hero-controls" id="hero-controls" aria-label="Hero cloud controls">
+      <div class="header">
+        <span class="name">hero cloud</span>
+        <button class="reset" id="hctl-reset" type="button" title="Reset all hero-cloud parameters to defaults">reset</button>
+      </div>
+      <div class="sliders">
+        <label for="hctl-size">size</label>
+        <input type="range" id="hctl-size" min="0.5" max="2.5" step="0.01" />
+        <span class="val" id="hval-size"></span>
+
+        <label for="hctl-density">density</label>
+        <input type="range" id="hctl-density" min="-0.2" max="0.5" step="0.01" />
+        <span class="val" id="hval-density"></span>
+
+        <label for="hctl-detail">detail</label>
+        <input type="range" id="hctl-detail" min="1.0" max="6.0" step="0.05" />
+        <span class="val" id="hval-detail"></span>
+
+        <label for="hctl-drift">drift</label>
+        <input type="range" id="hctl-drift" min="0" max="3" step="0.05" />
+        <span class="val" id="hval-drift"></span>
+
+        <label for="hctl-softness">softness</label>
+        <input type="range" id="hctl-softness" min="0.02" max="0.25" step="0.005" />
+        <span class="val" id="hval-softness"></span>
+      </div>
+    </aside>
 
     <aside class="cloud-controls" aria-label="Sky cloud controls">
       <div class="header">
@@ -810,6 +910,10 @@
           uniform float uTime;
           uniform vec2 uResolution;
           uniform float uGrabbed;   // 0 idle, 1 grabbed (smoothed)
+          uniform float uDensity;   // silhouette offset (higher = fuller)
+          uniform float uDetail;    // FBM scale (higher = smaller puffs)
+          uniform float uDrift;     // time-drift multiplier (0 = static)
+          uniform float uSoftness;  // smoothstep upper bound (higher = hazier edge)
           uniform vec3 uShadow;     // dim cloud underside / shaded side
           uniform vec3 uHighlight;  // lit puff highlight
           uniform vec3 uTint;       // gold tint while grabbed
@@ -838,43 +942,35 @@
 
           void main() {
             vec2 uv = gl_FragCoord.xy / uResolution.xy;
-            // Aspect-preserved centered coords so puff scale stays right
-            // at any canvas aspect ratio.
             vec2 centered = (gl_FragCoord.xy - 0.5 * uResolution)
                             / min(uResolution.x, uResolution.y);
 
-            // FBM is the cloud — sampled in a slowly-drifting 2D space.
-            // Two layered samples at different scales give big puff shapes
-            // plus higher-frequency edge wiggle.
-            vec2 cloudUv = uv * 2.8 + vec2(uTime * 0.045, uTime * 0.02);
+            // FBM sampled at uDetail × base scale. Drift scaled by uDrift —
+            // 0 freezes the cloud, ≥1 morphs visibly. Two layered samples
+            // (base + 2.5× freq) for big puff shapes + edge wiggle.
+            vec2 cloudUv = uv * uDetail
+                         + vec2(uTime * 0.045 * uDrift, uTime * 0.02 * uDrift);
             float n1 = fbm(cloudUv);
-            float n2 = fbm(cloudUv * 2.5 + vec2(uTime * 0.025, -uTime * 0.018));
+            float n2 = fbm(cloudUv * 2.5
+                         + vec2(uTime * 0.025 * uDrift, -uTime * 0.018 * uDrift));
             float density = mix(n1, n2, 0.4);
 
-            // SILHOUETTE comes from the noise itself, not an oval mask.
-            // Subtracting a soft distance falloff (slightly aspect-warped
-            // so the cloud sits wider than tall) keeps the cloud contained
-            // — but the iso-line at silhouette ≈ 0 is the FBM surface
-            // intersected with a soft cone, which gives irregular, puffy,
-            // cloud-like edges instead of a clean oval rim.
+            // Silhouette comes from the noise itself. distance scaled so the
+            // cloud is wider than tall; uDensity bumps the offset — higher
+            // values keep more of the puff above the smoothstep threshold,
+            // making the cloud bigger / fuller.
             float dist = length(centered * vec2(0.92, 1.65));
-            float silhouette = density - dist * 1.05 + 0.12;
+            float silhouette = density - dist * 1.05 + uDensity;
 
-            // Tight smoothstep band → sharp-ish but still soft puff edges.
-            float alpha = smoothstep(-0.02, 0.07, silhouette);
+            // uSoftness widens the smoothstep band → softer / hazier edges.
+            float alpha = smoothstep(-0.02, uSoftness, silhouette);
 
-            // Interior shading: brighter where the cloud is denser (= where
-            // FBM is high), darker at thinner edges. Reads as little
-            // light/shadow variation across the puff body without any
-            // background needed.
+            // Interior shading from FBM density (brighter where denser).
             float shade = smoothstep(0.35, 0.85, density);
             vec3 color = mix(uShadow, uHighlight, shade);
             color += uTint * uGrabbed * 0.30;
 
-            // Grab feedback: lift alpha slightly so the cloud reads denser
-            // while held.
             alpha = clamp(alpha * (1.0 + uGrabbed * 0.18), 0.0, 1.0);
-
             gl_FragColor = vec4(color * alpha, alpha);
           }
         `;
@@ -915,6 +1011,10 @@
           time: gl.getUniformLocation(prog, 'uTime'),
           res: gl.getUniformLocation(prog, 'uResolution'),
           grabbed: gl.getUniformLocation(prog, 'uGrabbed'),
+          density: gl.getUniformLocation(prog, 'uDensity'),
+          detail: gl.getUniformLocation(prog, 'uDetail'),
+          drift: gl.getUniformLocation(prog, 'uDrift'),
+          softness: gl.getUniformLocation(prog, 'uSoftness'),
           shadow: gl.getUniformLocation(prog, 'uShadow'),
           highlight: gl.getUniformLocation(prog, 'uHighlight'),
           tint: gl.getUniformLocation(prog, 'uTint'),
@@ -926,6 +1026,19 @@
         gl.uniform3f(U.shadow, 0.74, 0.78, 0.82);       // #BDC7D1 pale shadow
         gl.uniform3f(U.highlight, 1.00, 0.985, 0.94);   // #FFFBF0 warm white
         gl.uniform3f(U.tint, 0.651, 0.506, 0.208);      // #A68135 gold
+
+        // Tunable params (driven by the bottom-right control panel). Defaults
+        // are the values the shader used before they were exposed.
+        const DEFAULTS = {
+          size: 1.0,       // multiplier on base 280×180 canvas
+          density: 0.12,
+          detail: 2.8,
+          drift: 1.0,
+          softness: 0.07,
+        };
+        const params = { ...DEFAULTS };
+        const BASE_W = 280;
+        const BASE_H = 180;
 
         // ── drag ────────────────────────────────────────────────────────
         // Track the offset between the cursor and the cloud's top-left so
@@ -994,23 +1107,96 @@
         const ro = new ResizeObserver(resize);
         ro.observe(hero);
 
+        // Apply the size param to the canvas CSS dimensions. ResizeObserver
+        // picks this up + reallocates the WebGL backing buffer.
+        function applySize() {
+          hero.style.width = Math.round(BASE_W * params.size) + 'px';
+          hero.style.height = Math.round(BASE_H * params.size) + 'px';
+        }
+        applySize();
+
+        // Hook into the control panel down below. We expose a global so the
+        // panel script (which runs after this IIFE) can drive params without
+        // a circular reference. The panel script reads + writes `params`,
+        // then calls `applySize()` for size changes.
+        window.__heroCloud = { params, DEFAULTS, applySize };
+
         const start = performance.now();
         let prev = start;
         function tick(now) {
           const dt = Math.min(0.05, (now - prev) / 1000);
           prev = now;
-          // Ease grabbed toward target over ~120ms so the brightness lift
-          // doesn't flicker on click-and-release.
           const alphaSmooth = 1 - Math.exp(-dt / 0.12);
           grabbed = grabbed + (grabTarget - grabbed) * alphaSmooth;
 
           gl.uniform1f(U.time, (now - start) / 1000);
           gl.uniform2f(U.res, hero.width, hero.height);
           gl.uniform1f(U.grabbed, grabbed);
+          gl.uniform1f(U.density, params.density);
+          gl.uniform1f(U.detail, params.detail);
+          gl.uniform1f(U.drift, params.drift);
+          gl.uniform1f(U.softness, params.softness);
           gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
           requestAnimationFrame(tick);
         }
         requestAnimationFrame(tick);
+      })();
+
+      // ─────────────────────────────────────────────────────────────────
+      // Hero-cloud control panel (bottom-right). Mirror of the sky panel
+      // on the left. Talks to the cloud via the window.__heroCloud handle
+      // the IIFE above exposes. No global state otherwise — the panel
+      // just toggles slider values + reflects them back.
+      // ─────────────────────────────────────────────────────────────────
+      (() => {
+        const hc = window.__heroCloud;
+        if (!hc) return;
+        const root = document.getElementById('hero-controls');
+        if (!root) return;
+
+        const fields = ['size', 'density', 'detail', 'drift', 'softness'];
+        const ctls = {};
+        const vals = {};
+        fields.forEach((k) => {
+          ctls[k] = document.getElementById('hctl-' + k);
+          vals[k] = document.getElementById('hval-' + k);
+        });
+
+        function sync() {
+          for (const k of fields) {
+            ctls[k].value = String(hc.params[k]);
+            vals[k].textContent = Number(hc.params[k]).toFixed(2);
+          }
+        }
+        sync();
+
+        ctls.size.addEventListener('input', () => {
+          hc.params.size = Number(ctls.size.value);
+          vals.size.textContent = hc.params.size.toFixed(2);
+          hc.applySize();
+        });
+        ctls.density.addEventListener('input', () => {
+          hc.params.density = Number(ctls.density.value);
+          vals.density.textContent = hc.params.density.toFixed(2);
+        });
+        ctls.detail.addEventListener('input', () => {
+          hc.params.detail = Number(ctls.detail.value);
+          vals.detail.textContent = hc.params.detail.toFixed(2);
+        });
+        ctls.drift.addEventListener('input', () => {
+          hc.params.drift = Number(ctls.drift.value);
+          vals.drift.textContent = hc.params.drift.toFixed(2);
+        });
+        ctls.softness.addEventListener('input', () => {
+          hc.params.softness = Number(ctls.softness.value);
+          vals.softness.textContent = hc.params.softness.toFixed(2);
+        });
+
+        document.getElementById('hctl-reset').addEventListener('click', () => {
+          Object.assign(hc.params, hc.DEFAULTS);
+          hc.applySize();
+          sync();
+        });
       })();
     </script>
   </body>
