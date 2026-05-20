@@ -293,39 +293,32 @@
       }
       .cloud-controls .sliders .val { font-size: 10px; opacity: 0.62; text-align: right; }
 
-      /* Hero cloud — a single contained cloud rendered to its own canvas,
-         sized to feel like a logo motif sitting under the brief copy. Click
-         it to send a ripple wave through the cloud body. */
-      .hero-cloud-wrap {
-        position: relative;
-        margin: 8px auto 36px;
-        width: 100%;
-        max-width: 480px;
-        height: 200px;
-      }
+      /* Hero cloud — a single noise-driven cloud rendered to a transparent
+         canvas that floats above every other element on the page. The user
+         can grab and drag it anywhere. No background, no border, no
+         container — just the cloud silhouette compositing over whatever the
+         sky shader is doing behind it. */
       canvas#hero-cloud {
-        width: 100%;
-        height: 100%;
+        position: fixed;
+        top: 360px;
+        /* Centered horizontally on first paint; CSS-only because the JS
+           drag updates `left` directly. Width 280 → left offset 140. */
+        left: calc(50% - 140px);
+        width: 280px;
+        height: 180px;
+        z-index: 5;
         display: block;
-        cursor: pointer;
-        touch-action: manipulation;
-        /* No background — the hero cloud is alpha-blended over whatever the
-           page background is, including the moving sky canvas behind it. */
+        cursor: grab;
+        /* Touch-action: none so dragging on phones doesn't scroll the page
+           — the cloud captures the gesture instead. */
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        /* No fill, no border. The cloud's own alpha-blended pixels are the
+           entire visual. */
+        background: transparent;
       }
-      .hero-cloud-hint {
-        position: absolute;
-        bottom: 4px;
-        left: 50%;
-        transform: translateX(-50%);
-        font: 9.5px/1 ui-monospace, Menlo, monospace;
-        letter-spacing: 0.18em;
-        text-transform: uppercase;
-        color: var(--ink-soft);
-        opacity: 0.42;
-        pointer-events: none;
-        transition: opacity 240ms ease;
-      }
-      .hero-cloud-wrap:hover .hero-cloud-hint { opacity: 0.7; }
+      canvas#hero-cloud.grabbing { cursor: grabbing; }
 
       .footer {
         font: 11px/1.5 ui-monospace, Menlo, monospace;
@@ -366,11 +359,6 @@
         just a room with a long memory and the music still playing.
       </p>
 
-      <div class="hero-cloud-wrap">
-        <canvas id="hero-cloud" aria-label="An interactive cloud. Click to send a ripple through it."></canvas>
-        <span class="hero-cloud-hint">click the cloud</span>
-      </div>
-
       <div class="pillars">
         <div class="pillar">
           <h3>Preserve</h3>
@@ -390,6 +378,11 @@
         Built with Three.js · WebGL clouds rendered live above
       </div>
     </main>
+
+    <!-- Floating, grabbable hero cloud — fixed-positioned so it sits above
+         the brief copy regardless of scroll. Drag from anywhere on its
+         body to reposition. -->
+    <canvas id="hero-cloud" aria-label="A draggable cloud. Click and drag to move it across the page."></canvas>
 
     <aside class="cloud-controls" aria-label="Sky cloud controls">
       <div class="header">
@@ -789,10 +782,18 @@
       }
 
       // ─────────────────────────────────────────────────────────────────
-      // Hero cloud — a single contained cloud rendered to its own canvas,
-      // sized to feel like the logo's cloud motif sitting under the brief.
-      // Clicking sends a ripple wave outward from the click point that
-      // distorts the cloud body and pulses brightness as it travels.
+      // Hero cloud — a single noise-driven cloud rendered to its own
+      // transparent canvas that floats above every other element on the
+      // page. The user grabs it and drags it anywhere. Colors are pulled
+      // from the SVG logo palette so the cloud reads as "of the logo".
+      //
+      // Drag behavior: pointer-event capture so the gesture follows the
+      // cursor even off-canvas. Touch-action: none on the canvas (set in
+      // CSS) so phones don't scroll the page while you're dragging.
+      //
+      // Visual feedback while grabbed: `uGrabbed` uniform (0 idle, 1
+      // grabbed) lifts cloud density + adds a gold tint so the grab
+      // registration is obvious, plus a hair of scale via CSS class.
       // ─────────────────────────────────────────────────────────────────
       (() => {
         const hero = document.getElementById('hero-cloud');
@@ -808,12 +809,10 @@
           precision mediump float;
           uniform float uTime;
           uniform vec2 uResolution;
-          // Ring-buffer of up to MAX_CLICKS recent clicks. Each is (uv.x,
-          // uv.y, age). age < 0 means slot is inactive.
-          uniform vec3 uClicks[4];
+          uniform float uGrabbed;   // 0 idle, 1 grabbed (smoothed)
           uniform vec3 uBase;       // navy interior shadow
           uniform vec3 uHighlight;  // cream highlight
-          uniform vec3 uTint;       // gold tint on click pulse
+          uniform vec3 uTint;       // gold tint while grabbed
 
           float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
           float vnoise(vec2 p) {
@@ -839,54 +838,33 @@
 
           void main() {
             vec2 uv = gl_FragCoord.xy / uResolution.xy;
-            // Aspect-preserved centered coords for the mask so the cloud
-            // ellipse doesn't get squashed when the canvas resizes.
+            // Aspect-preserved centered coords so the silhouette stays a
+            // cloud (not a squashed oval) at any canvas aspect ratio.
             vec2 centered = (gl_FragCoord.xy - 0.5 * uResolution)
                             / min(uResolution.x, uResolution.y);
 
-            // Cloud mask — wide-flat ellipse, soft edges. y stretched so the
-            // overall shape reads as cloud-like rather than circular.
+            // Cloud silhouette — wide-flat ellipse with a soft edge. y
+            // multiplier > x multiplier so the cloud is wider than tall.
             float distMask = length(centered * vec2(0.78, 1.65));
             float mask = smoothstep(0.52, 0.18, distMask);
 
-            // Accumulate ripple distortion + brightness pulse from any
-            // active clicks. Ring wave: the wavefront is the locus of
-            // points at distance age * speed from the click. Two effects:
-            //   - displacement of cloud sample point on the ring (visible
-            //     as the cloud's pattern compressing/expanding)
-            //   - additive brightness pulse on the ring (the gold tint)
-            vec2 distort = vec2(0.0);
-            float pulse = 0.0;
-            for (int i = 0; i < 4; i++) {
-              float age = uClicks[i].z;
-              if (age < 0.0 || age > 1.6) continue;
-              vec2 toClick = uv - uClicks[i].xy;
-              float d = length(toClick);
-              float speed = 0.55;
-              float ringDelta = d - age * speed;
-              float ring = exp(-ringDelta * ringDelta * 90.0);
-              float fade = exp(-age * 2.0);
-              distort += normalize(toClick + vec2(1e-6)) * ring * fade * 0.035;
-              pulse += ring * fade;
-            }
-
-            // Cloud noise — 2D is fine here, the canvas is a plane not a
-            // sphere so the equirect seams don't apply.
-            vec2 cloudUv = (uv + distort) * 3.8;
+            // Cloud noise — 2D FBM. Drifts slowly on both axes so the
+            // cloud's interior pattern is always shifting even when the
+            // canvas itself is stationary.
+            vec2 cloudUv = uv * 3.8;
             cloudUv += vec2(uTime * 0.04, uTime * 0.018);
             float c1 = fbm(cloudUv);
             float c2 = fbm(cloudUv * 1.9 + vec2(uTime * 0.025, 0.0));
             float clouds = mix(c1, c2, 0.55);
             clouds = smoothstep(0.36, 0.84, clouds);
 
+            // Grab feedback: brightens + gold-tints the cloud while held.
             vec3 color = mix(uBase, uHighlight, clouds);
-            color += uTint * pulse * 0.55;
-            // Alpha follows the elliptical MASK (so the cloud is always
-            // visible inside its silhouette), with cloud FBM modulating
-            // density and pulses briefly brightening. Without this, low-FBM
-            // pixels in the middle of the cloud would punch through to the
-            // page behind — invisible cloud.
-            float alpha = clamp(mask * (0.70 + 0.30 * clouds + pulse * 0.35), 0.0, 1.0);
+            color += uTint * uGrabbed * 0.30;
+            // Alpha follows the elliptical MASK so the cloud is always
+            // visible inside its silhouette; cloud FBM modulates density
+            // inside that shape. Grabbing lifts the density floor.
+            float alpha = clamp(mask * (0.72 + 0.28 * clouds + uGrabbed * 0.15), 0.0, 1.0);
             gl_FragColor = vec4(color * alpha, alpha);
           }
         `;
@@ -919,39 +897,75 @@
         gl.enableVertexAttribArray(aPos);
         gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
 
-        // We're rendering with alpha — premultiplied since we output color *
-        // alpha. Standard "over" blend for compositing onto the page.
+        // Premultiplied "over" blend; matches gl_FragColor = vec4(color * alpha, alpha).
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
         const U = {
           time: gl.getUniformLocation(prog, 'uTime'),
           res: gl.getUniformLocation(prog, 'uResolution'),
-          clicks: gl.getUniformLocation(prog, 'uClicks'),
+          grabbed: gl.getUniformLocation(prog, 'uGrabbed'),
           base: gl.getUniformLocation(prog, 'uBase'),
           highlight: gl.getUniformLocation(prog, 'uHighlight'),
           tint: gl.getUniformLocation(prog, 'uTint'),
         };
-        // Logo palette — pulled from the SVG fills.
+        // Logo palette — sampled from the SVG fills.
         gl.uniform3f(U.base, 0.145, 0.239, 0.447);      // #253D72 navy
         gl.uniform3f(U.highlight, 0.941, 0.886, 0.788); // #F0E2C9 cream
         gl.uniform3f(U.tint, 0.651, 0.506, 0.208);      // #A68135 gold
 
-        // Click ring buffer — 4 slots, each (uv.x, uv.y, age). age < 0 = empty.
-        const clicks = new Float32Array(12);
-        for (let i = 0; i < 4; i++) clicks[i * 3 + 2] = -1;
-        let writeIdx = 0;
+        // ── drag ────────────────────────────────────────────────────────
+        // Track the offset between the cursor and the cloud's top-left so
+        // the cloud stays anchored to wherever inside its body you grabbed
+        // — clouds don't snap to the cursor centre.
+        let dragging = false;
+        let dragPointerId = -1;
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
+        // Smoothed grab indicator (0..1) — eased toward target so the
+        // visual change isn't a hard cut.
+        let grabbed = 0;
+        let grabTarget = 0;
 
-        hero.addEventListener('pointerdown', (e) => {
+        const onDown = (e) => {
+          if (dragging) return;
+          dragging = true;
+          dragPointerId = e.pointerId;
           const rect = hero.getBoundingClientRect();
-          // WebGL has origin at bottom-left; CSS at top-left. Flip Y.
-          const u = (e.clientX - rect.left) / rect.width;
-          const v = 1 - (e.clientY - rect.top) / rect.height;
-          clicks[writeIdx * 3 + 0] = u;
-          clicks[writeIdx * 3 + 1] = v;
-          clicks[writeIdx * 3 + 2] = 0;
-          writeIdx = (writeIdx + 1) % 4;
-        });
+          dragOffsetX = e.clientX - rect.left;
+          dragOffsetY = e.clientY - rect.top;
+          grabTarget = 1;
+          hero.classList.add('grabbing');
+          try { hero.setPointerCapture(e.pointerId); } catch { /* ignored */ }
+          e.preventDefault();
+        };
+        const onMove = (e) => {
+          if (!dragging || e.pointerId !== dragPointerId) return;
+          // Clamp so the cloud can't be dragged completely off-viewport —
+          // leave 60px showing on every side so it's always recoverable.
+          const margin = 60;
+          const maxLeft = window.innerWidth - margin;
+          const minLeft = margin - hero.clientWidth;
+          const maxTop = window.innerHeight - margin;
+          const minTop = margin - hero.clientHeight;
+          const left = Math.max(minLeft, Math.min(maxLeft, e.clientX - dragOffsetX));
+          const top = Math.max(minTop, Math.min(maxTop, e.clientY - dragOffsetY));
+          hero.style.left = left + 'px';
+          hero.style.top = top + 'px';
+        };
+        const onUp = (e) => {
+          if (!dragging || e.pointerId !== dragPointerId) return;
+          dragging = false;
+          dragPointerId = -1;
+          grabTarget = 0;
+          hero.classList.remove('grabbing');
+          try { hero.releasePointerCapture(e.pointerId); } catch { /* ignored */ }
+        };
+        hero.addEventListener('pointerdown', onDown);
+        hero.addEventListener('pointermove', onMove);
+        hero.addEventListener('pointerup', onUp);
+        hero.addEventListener('pointercancel', onUp);
+        hero.addEventListener('lostpointercapture', onUp);
 
         function resize() {
           const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
@@ -972,19 +986,14 @@
         function tick(now) {
           const dt = Math.min(0.05, (now - prev) / 1000);
           prev = now;
-
-          // Age all active clicks; retire ones older than the ring lifetime.
-          for (let i = 0; i < 4; i++) {
-            const age = clicks[i * 3 + 2];
-            if (age >= 0) {
-              const next = age + dt;
-              clicks[i * 3 + 2] = next > 1.6 ? -1 : next;
-            }
-          }
+          // Ease grabbed toward target over ~120ms so the brightness lift
+          // doesn't flicker on click-and-release.
+          const alphaSmooth = 1 - Math.exp(-dt / 0.12);
+          grabbed = grabbed + (grabTarget - grabbed) * alphaSmooth;
 
           gl.uniform1f(U.time, (now - start) / 1000);
           gl.uniform2f(U.res, hero.width, hero.height);
-          gl.uniform3fv(U.clicks, clicks);
+          gl.uniform1f(U.grabbed, grabbed);
           gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
           requestAnimationFrame(tick);
         }
