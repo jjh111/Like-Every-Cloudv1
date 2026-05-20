@@ -810,8 +810,8 @@
           uniform float uTime;
           uniform vec2 uResolution;
           uniform float uGrabbed;   // 0 idle, 1 grabbed (smoothed)
-          uniform vec3 uBase;       // navy interior shadow
-          uniform vec3 uHighlight;  // cream highlight
+          uniform vec3 uShadow;     // dim cloud underside / shaded side
+          uniform vec3 uHighlight;  // lit puff highlight
           uniform vec3 uTint;       // gold tint while grabbed
 
           float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -838,33 +838,43 @@
 
           void main() {
             vec2 uv = gl_FragCoord.xy / uResolution.xy;
-            // Aspect-preserved centered coords so the silhouette stays a
-            // cloud (not a squashed oval) at any canvas aspect ratio.
+            // Aspect-preserved centered coords so puff scale stays right
+            // at any canvas aspect ratio.
             vec2 centered = (gl_FragCoord.xy - 0.5 * uResolution)
                             / min(uResolution.x, uResolution.y);
 
-            // Cloud silhouette — wide-flat ellipse with a soft edge. y
-            // multiplier > x multiplier so the cloud is wider than tall.
-            float distMask = length(centered * vec2(0.78, 1.65));
-            float mask = smoothstep(0.52, 0.18, distMask);
+            // FBM is the cloud — sampled in a slowly-drifting 2D space.
+            // Two layered samples at different scales give big puff shapes
+            // plus higher-frequency edge wiggle.
+            vec2 cloudUv = uv * 2.8 + vec2(uTime * 0.045, uTime * 0.02);
+            float n1 = fbm(cloudUv);
+            float n2 = fbm(cloudUv * 2.5 + vec2(uTime * 0.025, -uTime * 0.018));
+            float density = mix(n1, n2, 0.4);
 
-            // Cloud noise — 2D FBM. Drifts slowly on both axes so the
-            // cloud's interior pattern is always shifting even when the
-            // canvas itself is stationary.
-            vec2 cloudUv = uv * 3.8;
-            cloudUv += vec2(uTime * 0.04, uTime * 0.018);
-            float c1 = fbm(cloudUv);
-            float c2 = fbm(cloudUv * 1.9 + vec2(uTime * 0.025, 0.0));
-            float clouds = mix(c1, c2, 0.55);
-            clouds = smoothstep(0.36, 0.84, clouds);
+            // SILHOUETTE comes from the noise itself, not an oval mask.
+            // Subtracting a soft distance falloff (slightly aspect-warped
+            // so the cloud sits wider than tall) keeps the cloud contained
+            // — but the iso-line at silhouette ≈ 0 is the FBM surface
+            // intersected with a soft cone, which gives irregular, puffy,
+            // cloud-like edges instead of a clean oval rim.
+            float dist = length(centered * vec2(0.92, 1.65));
+            float silhouette = density - dist * 1.05 + 0.12;
 
-            // Grab feedback: brightens + gold-tints the cloud while held.
-            vec3 color = mix(uBase, uHighlight, clouds);
+            // Tight smoothstep band → sharp-ish but still soft puff edges.
+            float alpha = smoothstep(-0.02, 0.07, silhouette);
+
+            // Interior shading: brighter where the cloud is denser (= where
+            // FBM is high), darker at thinner edges. Reads as little
+            // light/shadow variation across the puff body without any
+            // background needed.
+            float shade = smoothstep(0.35, 0.85, density);
+            vec3 color = mix(uShadow, uHighlight, shade);
             color += uTint * uGrabbed * 0.30;
-            // Alpha follows the elliptical MASK so the cloud is always
-            // visible inside its silhouette; cloud FBM modulates density
-            // inside that shape. Grabbing lifts the density floor.
-            float alpha = clamp(mask * (0.72 + 0.28 * clouds + uGrabbed * 0.15), 0.0, 1.0);
+
+            // Grab feedback: lift alpha slightly so the cloud reads denser
+            // while held.
+            alpha = clamp(alpha * (1.0 + uGrabbed * 0.18), 0.0, 1.0);
+
             gl_FragColor = vec4(color * alpha, alpha);
           }
         `;
@@ -905,13 +915,16 @@
           time: gl.getUniformLocation(prog, 'uTime'),
           res: gl.getUniformLocation(prog, 'uResolution'),
           grabbed: gl.getUniformLocation(prog, 'uGrabbed'),
-          base: gl.getUniformLocation(prog, 'uBase'),
+          shadow: gl.getUniformLocation(prog, 'uShadow'),
           highlight: gl.getUniformLocation(prog, 'uHighlight'),
           tint: gl.getUniformLocation(prog, 'uTint'),
         };
-        // Logo palette — sampled from the SVG fills.
-        gl.uniform3f(U.base, 0.145, 0.239, 0.447);      // #253D72 navy
-        gl.uniform3f(U.highlight, 0.941, 0.886, 0.788); // #F0E2C9 cream
+        // Cloud-like palette: pale cream-blue shadow on the thinner / less
+        // dense parts of the puff, warm near-white highlight on the lit
+        // crests. Gold accent stays for grab feedback (matches the logo's
+        // gold sparkle decoration).
+        gl.uniform3f(U.shadow, 0.74, 0.78, 0.82);       // #BDC7D1 pale shadow
+        gl.uniform3f(U.highlight, 1.00, 0.985, 0.94);   // #FFFBF0 warm white
         gl.uniform3f(U.tint, 0.651, 0.506, 0.208);      // #A68135 gold
 
         // ── drag ────────────────────────────────────────────────────────
