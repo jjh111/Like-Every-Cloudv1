@@ -11,6 +11,7 @@ import {
   MeshBasicMaterial,
   Points,
   PointsMaterial,
+  Quaternion,
   type Scene,
   ShaderMaterial,
   SphereGeometry,
@@ -95,6 +96,17 @@ const SHAFT_FS = /* glsl */ `
 // Tiny vertex-shader prelude so SHAFT_VS can use uInvHeight uniform.
 const SHAFT_VS_PREFIX = 'uniform float uInvHeight;\n';
 
+// Per-frame scratch vectors for applySunOrientation — module-scoped so the
+// per-shaft loop doesn't allocate. Safe because the function runs strictly
+// synchronously on the render thread.
+const SUN_TMP_AIM = new Vector3();
+const SUN_TMP_OFFSET = new Vector3();
+const SUN_TMP_UP = new Vector3();
+const SUN_TMP_DIR = new Vector3();
+const SUN_TMP_AXIS = new Vector3();
+const SUN_TMP_SHAFT_DIR = new Vector3();
+const SUN_TMP_ROT = new Quaternion();
+
 export interface MorningShaftConfig {
   shafts?: ShaftDef[];
   dustCount?: number;
@@ -105,6 +117,11 @@ export interface MorningShaftConfig {
   fogDensity?: number;
   dustOpacity?: number;
   dustSize?: number;
+  /** Clock t at which the authored shaft directions are correct. At runtime
+   *  the cones rotate around their origins as the sun moves away from this
+   *  reference. Default 0.42 matches the authored direction of the existing
+   *  shafts (mid-morning sun for the current scene). */
+  shaftReferenceT?: number;
 }
 
 export class MorningShaft implements Atmosphere {
@@ -129,6 +146,16 @@ export class MorningShaft implements Atmosphere {
   private dotTex: CanvasTexture | null = null;
   private originalFog: Scene['fog'] = null;
   private shaftColor = new Color(0xfff2dd);
+  /** Authored t the shaft directions were drawn at; cones rotate around
+   *  their origins by the delta from this to the live sun direction. */
+  shaftReferenceT = 0.42;
+  /** Sun direction at shaftReferenceT — cached so we don't recompute the
+   *  arc each frame. Refreshed if shaftReferenceT changes. */
+  private referenceSunDir = new Vector3();
+  /** When the sun isn't being driven by a SunRig (NoAtmosphere context, dev
+   *  fallback), this stays true and the cones render at their authored
+   *  positions, intensity uses the authored shaftIntensity directly. */
+  private sunRigSeen = false;
 
   constructor(config?: MorningShaftConfig) {
     // Placeholders sized to the SolidWallStructure footprint we saw in app.ts
@@ -154,6 +181,22 @@ export class MorningShaft implements Atmosphere {
     if (typeof config?.fogDensity === 'number') this.fogDensity = config.fogDensity;
     if (typeof config?.dustOpacity === 'number') this.dustOpacity = config.dustOpacity;
     if (typeof config?.dustSize === 'number') this.dustSize = config.dustSize;
+    if (typeof config?.shaftReferenceT === 'number') this.shaftReferenceT = config.shaftReferenceT;
+    // Compute the reference sun direction so update() can derive the delta
+    // each frame without re-running the arc math. The latitude tilt used
+    // here MUST match the clock's; -0.16 is the project default.
+    this.computeReferenceSunDir();
+  }
+
+  private computeReferenceSunDir(): void {
+    const t = this.shaftReferenceT;
+    const phase = (t - 0.25) * Math.PI * 2;
+    const tilt = -0.16;
+    this.referenceSunDir.set(
+      Math.cos(phase),
+      Math.sin(phase) * Math.cos(tilt),
+      Math.sin(phase) * Math.sin(tilt),
+    ).normalize();
   }
 
   init(ctx: AtmosphereContext): void {
@@ -272,16 +315,14 @@ export class MorningShaft implements Atmosphere {
       mat.size = this.dustSize;
     }
 
-    // Push tunable changes into shader uniforms / fog.
-    for (const cone of this.cones) {
-      cone.material.uniforms.uIntensity.value = this.shaftIntensity;
-    }
     if (ctx.scene.fog instanceof FogExp2) {
       ctx.scene.fog.density = this.fogDensity;
     }
 
-    // Sync handles -> shaft data. The dev panel attaches TransformControls to
-    // a handle; whatever position the gizmo leaves it at, the cone follows.
+    // Sync handles -> shaft data FIRST. The dev panel attaches TransformControls
+    // to a handle; whatever position the gizmo leaves it at, this.shafts
+    // mirrors. Note the handles always reflect AUTHORED positions — sun
+    // rotation never writes back to this.shafts.
     for (let i = 0; i < this.shafts.length; i++) {
       const oH = this.handles[i * 2 + 0];
       const aH = this.handles[i * 2 + 1];
@@ -291,6 +332,75 @@ export class MorningShaft implements Atmosphere {
         this.setShaft(i, oH.position, aH.position, s.radius);
       }
     }
+
+    // Time-of-day integration. SunRig supplies the live sun direction +
+    // altitude. We rotate each cone visual around its origin by the
+    // delta from the authored sun direction to the live one — preserving
+    // shaft length so no geometry regen needed — and modulate intensity
+    // by clamp(sun.y, 0, 1) so shafts fade out below the horizon.
+    //
+    // Workflow note: handles sit at AUTHORED positions, not rotated ones.
+    // For visually-aligned shaft editing, snap the clock to shaftReferenceT
+    // first (the dev panel has a button for this).
+    const sun = ctx.sunRig;
+    if (sun) {
+      const sunDir = sun.sunDirection;
+      for (let i = 0; i < this.cones.length; i++) {
+        this.applySunOrientation(i, sunDir);
+      }
+      const altClamped = Math.max(0, sun.altitude);
+      const liveIntensity = this.shaftIntensity * altClamped;
+      for (const cone of this.cones) {
+        cone.material.uniforms.uIntensity.value = liveIntensity;
+      }
+    } else {
+      // No SunRig — render shafts at authored direction + authored intensity.
+      for (const cone of this.cones) {
+        cone.material.uniforms.uIntensity.value = this.shaftIntensity;
+      }
+    }
+  }
+
+  /** Rotate cone visual around its origin by the delta from the authored
+   *  sun direction (at shaftReferenceT) to the current sun direction. Pure
+   *  rotation preserves the shaft's length, so no geometry regen. */
+  private applySunOrientation(index: number, currentSunDir: Vector3): void {
+    const shaft = this.shafts[index];
+    const cone = this.cones[index];
+    if (!cone) return;
+
+    const aimOut = SUN_TMP_AIM;
+    aimOut.copy(shaft.aim);
+    // Below horizon → intensity will be 0 so geometry doesn't matter; skip
+    // the math to keep the cone in its authored shape.
+    if (currentSunDir.y > 0.001 && this.referenceSunDir.y > 0.001) {
+      SUN_TMP_OFFSET.copy(shaft.aim).sub(shaft.origin);
+      SUN_TMP_ROT.setFromUnitVectors(this.referenceSunDir, currentSunDir);
+      SUN_TMP_OFFSET.applyQuaternion(SUN_TMP_ROT);
+      aimOut.copy(shaft.origin).add(SUN_TMP_OFFSET);
+    }
+
+    cone.mesh.position.copy(aimOut);
+    const up = SUN_TMP_UP;
+    up.set(0, 1, 0);
+    const dir = SUN_TMP_DIR;
+    dir.copy(shaft.origin).sub(aimOut).normalize();
+    const dotUp = Math.max(-1, Math.min(1, up.dot(dir)));
+    if (dotUp < 0.999) {
+      const axis = SUN_TMP_AXIS;
+      axis.crossVectors(up, dir);
+      if (axis.lengthSq() > 1e-6) {
+        cone.mesh.quaternion.setFromAxisAngle(axis.normalize(), Math.acos(dotUp));
+      }
+    } else {
+      cone.mesh.quaternion.identity();
+    }
+
+    // Shader uniform: world-space shaft direction (origin → aim). Used by
+    // the shader's view-alignment fade.
+    const shaftDirWorld = SUN_TMP_SHAFT_DIR;
+    shaftDirWorld.copy(aimOut).sub(shaft.origin).normalize();
+    (cone.material.uniforms.uShaftDir.value as Vector3).copy(shaftDirWorld);
   }
 
   dispose(ctx: AtmosphereContext): void {

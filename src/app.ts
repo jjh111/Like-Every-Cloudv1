@@ -22,6 +22,9 @@ import { createDebugPanel } from './debug/debugPanel';
 import type { Atmosphere } from './atmosphere/atmosphere';
 import { NoAtmosphere } from './atmosphere/atmosphere';
 import { MorningShaft, type MorningShaftConfig, type ShaftDef } from './atmosphere/morningShaft';
+import { TimeOfDayClock } from './atmosphere/timeOfDayClock';
+import { SunRig } from './atmosphere/sunRig';
+import { CloudSky } from './atmosphere/cloudSky';
 import { loadStateConfig, buildStateRules } from './state/stateConfig';
 import { createWallCull, type CullSettings } from './scene/wallCull';
 import { createCameraHandles } from './scene/cameraHandles';
@@ -472,7 +475,20 @@ export async function start(container: HTMLElement): Promise<void> {
     console.warn('[atmosphere] config load failed, using defaults', e);
   }
 
-  const atmosphereCtx = { scene, camera };
+  // Time-of-day clock + SunRig — unified lighting source. Created BEFORE
+  // atmospheres so MorningShaft.init() can read the sun direction. Clock
+  // defaults to t=0.42 (warm late morning) to match the existing scene's
+  // visual baseline; auto-cycle is OFF by default — dev controls it.
+  const clock = new TimeOfDayClock({ initialT: 0.42, dayLengthSeconds: 600, running: false });
+  const sunRig = new SunRig(scene, clock);
+
+  // CloudSky is the 3D sky dome. Lives alongside the atmosphere selector
+  // (not part of it) so MorningShaft / NoAtmosphere swaps don't affect
+  // the sky. Always on.
+  const cloudSky = new CloudSky(sunRig);
+  cloudSky.add(scene);
+
+  const atmosphereCtx = { scene, camera, sunRig };
   const atmospheres: Record<string, Atmosphere> = {
     'morning-shaft': new MorningShaft(morningShaftConfig),
     'none': new NoAtmosphere(),
@@ -924,6 +940,8 @@ export async function start(container: HTMLElement): Promise<void> {
       goToBookmark,
       saveCurrentAsBookmark: (name: string) => { void saves.saveCurrentAsBookmark(name); },
       deleteBookmark: (name: string) => { void saves.deleteBookmark(name); },
+      clock,
+      morningShaft,
     });
 
     createHeroStatePanel(heroLookup, stateController, () => {
@@ -988,6 +1006,9 @@ export async function start(container: HTMLElement): Promise<void> {
     cameras,
     bookmarks,
     gizmoUndo,
+    clock,
+    sunRig,
+    cloudSky,
     get activeCamera() { return activeCamera; },
     get activeAtmosphere() { return activeAtmosphere; },
   };
@@ -1009,7 +1030,23 @@ export async function start(container: HTMLElement): Promise<void> {
     stateController.tick(dt);
     active.update(stateController.context);
     activeCamera.update(dt);
+
+    // Time-of-day + lighting unification. Order matters:
+    //   1. clock.tick advances t if running.
+    //   2. sunRig.update recomputes sun direction + palette + DirectionalLight
+    //      + AmbientLight from the new t. Atmospheres downstream see the
+    //      fresh state via ctx.sunRig.
+    //   3. cloudSky reads sunRig + re-centres on the camera (sphere tracks
+    //      camera so the sky stays at infinity).
+    //   4. atmosphere update (MorningShaft) reads sunRig, rotates its
+    //      cones + scales intensity by altitude.
+    //   5. Fog colour mirrors palette bottom so the horizon line of the
+    //      cloud sky meets the fog softly. Works for both Fog and FogExp2.
+    clock.tick(dt);
+    sunRig.update();
+    cloudSky.update(camera.position, dt);
     activeAtmosphere.update(atmosphereCtx, dt);
+    if (scene.fog) scene.fog.color.copy(sunRig.palette.bottom);
     for (const cloth of cloths) cloth.tick(dt);
     // Mirror any gizmo-driven marker changes into the source-of-truth
     // vectors that the tween + save flow read.

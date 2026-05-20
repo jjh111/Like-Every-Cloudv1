@@ -4,6 +4,8 @@ import type { Transition } from '../transitions/transition';
 import type { CameraMode } from '../camera/cameraMode';
 import type { AudioManager } from '../audio/audioManager';
 import type { Atmosphere } from '../atmosphere/atmosphere';
+import type { TimeOfDayClock } from '../atmosphere/timeOfDayClock';
+import type { MorningShaft } from '../atmosphere/morningShaft';
 
 export interface DebugDeps {
   state: StateController;
@@ -54,6 +56,13 @@ export interface DebugDeps {
   saveCurrentAsBookmark: (name: string) => void;
   /** Remove a bookmark by name + persist. */
   deleteBookmark: (name: string) => void;
+  /** Time-of-day clock (unified lighting source). Panel exposes a t slider,
+   *  a paused/auto toggle, day-length slider, and snap-to-time buttons. */
+  clock: TimeOfDayClock;
+  /** Morning shaft — needed for the "snap to shaft reference t" button
+   *  which jumps the clock to the time at which the authored shafts are
+   *  drawn so the gizmo handles align with the cone visuals during edits. */
+  morningShaft: MorningShaft;
 }
 
 type Controller = ReturnType<GUI['add']>;
@@ -112,6 +121,54 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
   stateFolder.add(stateProxy, 'animateOther').name('animate to other');
   stateFolder.add(stateProxy, 'transition', Object.keys(deps.transitions))
     .onChange((v: string) => deps.setTransition(v));
+
+  // ── time of day ────────────────────────────────────────────────────────
+  // Drives the unified SunRig (directional light + ambient + sky palette).
+  // CloudSky + MorningShaft both read the clock through SunRig — moving
+  // this slider re-paints the entire scene's lighting.
+  //
+  // Default is paused so the directors see a stable scene; toggling "running"
+  // advances time by `dayLengthSeconds` real seconds = 24 scene hours.
+  const timeFolder = gui.addFolder('time of day');
+  const timeProxy = {
+    t: deps.clock.t,
+    clock: deps.clock.formatHM(),
+    running: deps.clock.running,
+    dayLengthSeconds: deps.clock.dayLengthSeconds,
+    dawn: () => { deps.clock.t = 0.25; },
+    noon: () => { deps.clock.t = 0.5; },
+    dusk: () => { deps.clock.t = 0.75; },
+    midnight: () => { deps.clock.t = 0; },
+    shaftRef: () => { deps.clock.t = deps.morningShaft.shaftReferenceT; },
+  };
+  // t slider — both directions: panel ↔ clock. The clock might tick on
+  // its own (when running), so we .listen() to mirror back into the slider.
+  timeFolder.add(timeProxy, 't', 0, 1, 0.001)
+    .onChange((v: number) => { deps.clock.t = v; })
+    .listen();
+  // Read-only clock chip (HH:MM). Refreshed below via the controller list.
+  const clockCtrl = timeFolder.add(timeProxy, 'clock').disable().listen();
+  timeFolder.add(timeProxy, 'running')
+    .onChange((v: boolean) => { deps.clock.running = v; })
+    .listen()
+    .name('auto cycle');
+  timeFolder.add(timeProxy, 'dayLengthSeconds', 30, 1800, 10)
+    .onChange((v: number) => { deps.clock.dayLengthSeconds = v; })
+    .name('day length (s)');
+  timeFolder.add(timeProxy, 'dawn').name('snap → dawn');
+  timeFolder.add(timeProxy, 'noon').name('snap → noon');
+  timeFolder.add(timeProxy, 'dusk').name('snap → dusk');
+  timeFolder.add(timeProxy, 'midnight').name('snap → midnight');
+  timeFolder.add(timeProxy, 'shaftRef').name('snap → shaft reference');
+  // Cheap polling tick so the HH:MM chip + t slider stay in sync when the
+  // clock advances on its own. The lil-gui .listen() handles `t` and
+  // `running`; the formatted `clock` string needs a manual refresh.
+  setInterval(() => {
+    timeProxy.t = deps.clock.t;
+    timeProxy.clock = deps.clock.formatHM();
+    timeProxy.running = deps.clock.running;
+    clockCtrl.updateDisplay();
+  }, 200);
 
   // ── camera ─────────────────────────────────────────────────────────────
   const cameraFolder = gui.addFolder('camera');

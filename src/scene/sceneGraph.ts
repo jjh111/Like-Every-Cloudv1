@@ -1,6 +1,4 @@
 import {
-  AmbientLight,
-  DirectionalLight,
   Fog,
   Mesh,
   MeshStandardMaterial,
@@ -10,24 +8,22 @@ import {
   WebGLRenderer,
 } from 'three';
 
-// Color that matches the CSS body gradient's horizon stop. Used as fog
-// color so the ground plane fades into the horizon line of the sky.
+// Color that matches the CSS body gradient's horizon stop. Used as initial
+// fog color so the ground plane fades cleanly before SunRig boots and
+// starts driving the fog colour from its palette each frame.
 const HORIZON_COLOR = 0xc9a878;
 
+// Sun + ambient lights are NOT created here anymore — they live on SunRig
+// (src/atmosphere/sunRig.ts), which owns the entire palette and drives them
+// from the TimeOfDayClock each frame. createScene only sets up the things
+// SunRig doesn't touch: the fog, the ground plane, the scene container.
 export function createScene(): Scene {
   const scene = new Scene();
-  // Renderer is alpha:true; the CSS body gradient (set in index.html) shows
-  // through. scene.background stays null.
+  // CloudSky paints a sky dome that fills the background; the renderer
+  // stays alpha:true so the CSS body gradient remains the load-time
+  // fallback under the canvas until the dome is up.
   scene.background = null;
   scene.fog = new Fog(HORIZON_COLOR, 35, 110);
-
-  // Warm daylight: a bright key + soft warm fill.
-  const ambient = new AmbientLight(0xfff2dd, 0.7);
-  scene.add(ambient);
-
-  const sun = new DirectionalLight(0xfff2dd, 1.3);
-  sun.position.set(15, 20, 10);
-  scene.add(sun);
 
   // Ground plane extending to the fog horizon. y matches the photoscan's dirt
   // level so the boundary blends rather than floating/clipping.
