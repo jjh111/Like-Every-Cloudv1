@@ -170,54 +170,162 @@
         .pillars { grid-template-columns: 1fr; }
       }
 
-      /* The preset chip in the corner is the small "look behind you" affordance.
-         It moves with the sky so visitors notice the background is alive,
-         not a static gradient. */
-      .preset {
+      /* Bottom-left interactive panel — visitors can click between presets,
+         drag sliders for fine-tuning, and toggle the auto-cycle. The panel
+         is intentionally compact so it doesn't compete with the brief copy,
+         but discoverable on mouseover. */
+      .cloud-controls {
         position: fixed;
         bottom: 18px;
         left: 20px;
         z-index: 2;
         display: flex;
         flex-direction: column;
-        gap: 4px;
-        padding: 10px 14px;
-        background: rgba(255, 255, 255, 0.55);
+        gap: 6px;
+        padding: 10px 14px 12px;
+        background: rgba(255, 255, 255, 0.62);
         backdrop-filter: blur(8px);
-        border: 1px solid rgba(255, 255, 255, 0.65);
+        border: 1px solid rgba(255, 255, 255, 0.7);
         border-radius: 12px;
         font: 11px/1.3 ui-monospace, Menlo, monospace;
         color: var(--ink);
-        min-width: 168px;
+        width: 252px;
         user-select: none;
-        pointer-events: none;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
       }
-      .preset .name {
+      .cloud-controls .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .cloud-controls .name {
         font-weight: 600;
         letter-spacing: 0.12em;
         text-transform: uppercase;
         font-size: 10.5px;
       }
-      .preset .meta {
-        opacity: 0.7;
-        font-size: 10px;
-      }
-      .preset .dots {
+      .cloud-controls .cycle-toggle {
         display: flex;
-        gap: 5px;
-        margin-top: 4px;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+        opacity: 0.78;
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
       }
-      .preset .dot {
-        width: 7px;
-        height: 7px;
+      .cloud-controls .cycle-toggle input {
+        appearance: none;
+        -webkit-appearance: none;
+        width: 22px;
+        height: 12px;
+        border-radius: 999px;
+        background: rgba(58, 47, 34, 0.18);
+        position: relative;
+        cursor: pointer;
+        transition: background 200ms ease;
+      }
+      .cloud-controls .cycle-toggle input::before {
+        content: '';
+        position: absolute;
+        top: 2px; left: 2px;
+        width: 8px; height: 8px;
         border-radius: 50%;
-        background: rgba(58, 47, 34, 0.2);
-        transition: background 240ms ease, transform 240ms ease;
-      }
-      .preset .dot.active {
         background: var(--ink);
-        transform: scale(1.18);
+        transition: transform 200ms ease;
       }
+      .cloud-controls .cycle-toggle input:checked { background: rgba(58, 47, 34, 0.35); }
+      .cloud-controls .cycle-toggle input:checked::before { transform: translateX(10px); }
+      .cloud-controls .dots {
+        display: flex;
+        gap: 6px;
+        padding: 2px 0 4px;
+      }
+      .cloud-controls .dot {
+        appearance: none;
+        -webkit-appearance: none;
+        background: rgba(58, 47, 34, 0.16);
+        border: none;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        cursor: pointer;
+        padding: 0;
+        transition: background 200ms ease, transform 200ms ease;
+        position: relative;
+      }
+      .cloud-controls .dot::after {
+        /* Hover-revealed tooltip with the preset name. */
+        content: attr(data-name);
+        position: absolute;
+        bottom: 130%; left: 50%; transform: translateX(-50%);
+        background: rgba(58, 47, 34, 0.9);
+        color: #f7f1e2;
+        padding: 2px 6px;
+        font-size: 9px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        border-radius: 4px;
+        opacity: 0;
+        pointer-events: none;
+        white-space: nowrap;
+        transition: opacity 160ms ease;
+      }
+      .cloud-controls .dot:hover { background: rgba(58, 47, 34, 0.35); transform: scale(1.12); }
+      .cloud-controls .dot:hover::after { opacity: 1; }
+      .cloud-controls .dot.active { background: var(--ink); transform: scale(1.18); }
+      .cloud-controls .sliders {
+        display: grid;
+        grid-template-columns: 52px 1fr 32px;
+        gap: 4px 8px;
+        margin-top: 4px;
+        padding-top: 8px;
+        border-top: 1px solid rgba(58, 47, 34, 0.14);
+        align-items: center;
+      }
+      .cloud-controls .sliders label { opacity: 0.62; font-size: 10px; }
+      .cloud-controls .sliders input[type="range"] {
+        width: 100%;
+        height: 14px;
+        accent-color: var(--ink);
+        cursor: pointer;
+        margin: 0;
+      }
+      .cloud-controls .sliders .val { font-size: 10px; opacity: 0.62; text-align: right; }
+
+      /* Hero cloud — a single contained cloud rendered to its own canvas,
+         sized to feel like a logo motif sitting under the brief copy. Click
+         it to send a ripple wave through the cloud body. */
+      .hero-cloud-wrap {
+        position: relative;
+        margin: 8px auto 36px;
+        width: 100%;
+        max-width: 480px;
+        height: 200px;
+      }
+      canvas#hero-cloud {
+        width: 100%;
+        height: 100%;
+        display: block;
+        cursor: pointer;
+        touch-action: manipulation;
+        /* No background — the hero cloud is alpha-blended over whatever the
+           page background is, including the moving sky canvas behind it. */
+      }
+      .hero-cloud-hint {
+        position: absolute;
+        bottom: 4px;
+        left: 50%;
+        transform: translateX(-50%);
+        font: 9.5px/1 ui-monospace, Menlo, monospace;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+        opacity: 0.42;
+        pointer-events: none;
+        transition: opacity 240ms ease;
+      }
+      .hero-cloud-wrap:hover .hero-cloud-hint { opacity: 0.7; }
 
       .footer {
         font: 11px/1.5 ui-monospace, Menlo, monospace;
@@ -258,6 +366,11 @@
         just a room with a long memory and the music still playing.
       </p>
 
+      <div class="hero-cloud-wrap">
+        <canvas id="hero-cloud" aria-label="An interactive cloud. Click to send a ripple through it."></canvas>
+        <span class="hero-cloud-hint">click the cloud</span>
+      </div>
+
       <div class="pillars">
         <div class="pillar">
           <h3>Preserve</h3>
@@ -278,10 +391,36 @@
       </div>
     </main>
 
-    <aside class="preset" aria-hidden="true">
-      <span class="name" id="preset-name">drift</span>
-      <span class="meta" id="preset-meta">density 0.55 · wind east</span>
-      <div class="dots" id="preset-dots"></div>
+    <aside class="cloud-controls" aria-label="Sky cloud controls">
+      <div class="header">
+        <span class="name" id="preset-name">drift</span>
+        <label class="cycle-toggle" title="Cycle through presets automatically">
+          <input type="checkbox" id="auto-cycle" checked />
+          auto
+        </label>
+      </div>
+      <div class="dots" id="preset-dots" role="tablist"></div>
+      <div class="sliders">
+        <label for="ctl-density">density</label>
+        <input type="range" id="ctl-density" min="0" max="1" step="0.01" />
+        <span class="val" id="val-density"></span>
+
+        <label for="ctl-speed">speed</label>
+        <input type="range" id="ctl-speed" min="0" max="1.5" step="0.01" />
+        <span class="val" id="val-speed"></span>
+
+        <label for="ctl-mix">mix</label>
+        <input type="range" id="ctl-mix" min="0" max="1" step="0.01" />
+        <span class="val" id="val-mix"></span>
+
+        <label for="ctl-windx">wind x</label>
+        <input type="range" id="ctl-windx" min="-1.5" max="1.5" step="0.01" />
+        <span class="val" id="val-windx"></span>
+
+        <label for="ctl-windy">wind y</label>
+        <input type="range" id="ctl-windy" min="-1.5" max="1.5" step="0.01" />
+        <span class="val" id="val-windy"></span>
+      </div>
     </aside>
 
     <script>
@@ -465,17 +604,11 @@
           },
         ];
 
-        // ─── preset cycling ────────────────────────────────────────────
-        const PRESET_DURATION = 7000; // each preset visible for this long
-        let presetIdx = 0;
-        let presetSwitchAt = performance.now();
-
-        // Live (currently-rendered) values lerp toward the target preset
-        // each frame. exponential smoothing — natural ease-in/ease-out
-        // without tracking a separate transition timer.
-        const live = clonePreset(presets[0]);
-        const tau = 0.9; // seconds — bigger = slower morph
-
+        // ─── target + live values ──────────────────────────────────────
+        // `target` is what the live uniforms lerp toward. Slider input writes
+        // directly into target; dot clicks copy a preset into it; the auto-
+        // cycle replaces it every PRESET_DURATION ms. live → target with
+        // exponential smoothing for soft transitions.
         function clonePreset(p) {
           return {
             density: p.density,
@@ -491,33 +624,120 @@
         function lerpVec(a, b, t) {
           for (let i = 0; i < a.length; i++) a[i] = lerp(a[i], b[i], t);
         }
-        function lerpToward(target, alpha) {
-          live.density = lerp(live.density, target.density, alpha);
-          live.speed = lerp(live.speed, target.speed, alpha);
-          live.mix = lerp(live.mix, target.mix, alpha);
-          lerpVec(live.skyTop, target.skyTop, alpha);
-          lerpVec(live.skyBottom, target.skyBottom, alpha);
-          lerpVec(live.cloudColor, target.cloudColor, alpha);
-          lerpVec(live.wind, target.wind, alpha);
+        const target = clonePreset(presets[0]);
+        const live = clonePreset(presets[0]);
+        const tau = 0.9;
+
+        function lerpToward(t, alpha) {
+          live.density = lerp(live.density, t.density, alpha);
+          live.speed = lerp(live.speed, t.speed, alpha);
+          live.mix = lerp(live.mix, t.mix, alpha);
+          lerpVec(live.skyTop, t.skyTop, alpha);
+          lerpVec(live.skyBottom, t.skyBottom, alpha);
+          lerpVec(live.cloudColor, t.cloudColor, alpha);
+          lerpVec(live.wind, t.wind, alpha);
         }
 
-        // ─── chip / dots ───────────────────────────────────────────────
+        // ─── controls ──────────────────────────────────────────────────
+        const PRESET_DURATION = 7000;
+        let presetIdx = 0;
+        let presetSwitchAt = performance.now();
+        let autoCycle = true;
+
         const presetName = document.getElementById('preset-name');
-        const presetMeta = document.getElementById('preset-meta');
         const dotsRoot = document.getElementById('preset-dots');
-        const dotEls = presets.map((_, i) => {
-          const d = document.createElement('span');
+        const cycleToggle = document.getElementById('auto-cycle');
+        const ctls = {
+          density: document.getElementById('ctl-density'),
+          speed: document.getElementById('ctl-speed'),
+          mix: document.getElementById('ctl-mix'),
+          windx: document.getElementById('ctl-windx'),
+          windy: document.getElementById('ctl-windy'),
+        };
+        const vals = {
+          density: document.getElementById('val-density'),
+          speed: document.getElementById('val-speed'),
+          mix: document.getElementById('val-mix'),
+          windx: document.getElementById('val-windx'),
+          windy: document.getElementById('val-windy'),
+        };
+
+        // Build clickable preset dots. Each carries its name as a tooltip
+        // so the user can see what they're picking before clicking.
+        const dotEls = presets.map((p, i) => {
+          const d = document.createElement('button');
           d.className = 'dot' + (i === 0 ? ' active' : '');
+          d.type = 'button';
+          d.dataset.name = p.name;
+          d.title = p.name + ' — ' + p.meta;
+          d.setAttribute('aria-label', 'preset: ' + p.name);
+          d.addEventListener('click', () => selectPreset(i));
           dotsRoot.appendChild(d);
           return d;
         });
-        function updateChip() {
-          const p = presets[presetIdx];
-          presetName.textContent = p.name;
-          presetMeta.textContent = p.meta;
-          dotEls.forEach((d, i) => d.classList.toggle('active', i === presetIdx));
+
+        function syncSlidersFromTarget() {
+          ctls.density.value = String(target.density);
+          ctls.speed.value = String(target.speed);
+          ctls.mix.value = String(target.mix);
+          ctls.windx.value = String(target.wind[0]);
+          ctls.windy.value = String(target.wind[1]);
+          vals.density.textContent = target.density.toFixed(2);
+          vals.speed.textContent = target.speed.toFixed(2);
+          vals.mix.textContent = target.mix.toFixed(2);
+          vals.windx.textContent = target.wind[0].toFixed(2);
+          vals.windy.textContent = target.wind[1].toFixed(2);
         }
-        updateChip();
+        function selectPreset(i) {
+          presetIdx = i;
+          const p = presets[i];
+          target.density = p.density;
+          target.speed = p.speed;
+          target.mix = p.mix;
+          target.skyTop = p.skyTop.slice();
+          target.skyBottom = p.skyBottom.slice();
+          target.cloudColor = p.cloudColor.slice();
+          target.wind = p.wind.slice();
+          presetName.textContent = p.name;
+          dotEls.forEach((d, k) => d.classList.toggle('active', k === i));
+          syncSlidersFromTarget();
+          // Reset the auto-cycle timer so the freshly-selected preset gets
+          // its full PRESET_DURATION before the next swap.
+          presetSwitchAt = performance.now();
+        }
+
+        // Slider inputs override the target's individual values. Auto-cycle
+        // stays on by default — when the cycle advances, slider edits get
+        // replaced by the new preset.
+        ctls.density.addEventListener('input', () => {
+          target.density = Number(ctls.density.value);
+          vals.density.textContent = target.density.toFixed(2);
+        });
+        ctls.speed.addEventListener('input', () => {
+          target.speed = Number(ctls.speed.value);
+          vals.speed.textContent = target.speed.toFixed(2);
+        });
+        ctls.mix.addEventListener('input', () => {
+          target.mix = Number(ctls.mix.value);
+          vals.mix.textContent = target.mix.toFixed(2);
+        });
+        ctls.windx.addEventListener('input', () => {
+          target.wind[0] = Number(ctls.windx.value);
+          vals.windx.textContent = target.wind[0].toFixed(2);
+        });
+        ctls.windy.addEventListener('input', () => {
+          target.wind[1] = Number(ctls.windy.value);
+          vals.windy.textContent = target.wind[1].toFixed(2);
+        });
+
+        cycleToggle.addEventListener('change', () => {
+          autoCycle = cycleToggle.checked;
+          // Restart the timer so toggling on doesn't instantly advance.
+          presetSwitchAt = performance.now();
+        });
+
+        // Initial slider populate.
+        syncSlidersFromTarget();
 
         // ─── resize ────────────────────────────────────────────────────
         function resize() {
@@ -539,20 +759,17 @@
         const start = performance.now();
         let prev = start;
         function tick(now) {
-          const dt = Math.min(0.05, (now - prev) / 1000); // cap big tab-switch dts
+          const dt = Math.min(0.05, (now - prev) / 1000);
           prev = now;
 
-          // Swap preset on schedule.
-          if (now - presetSwitchAt > PRESET_DURATION) {
-            presetIdx = (presetIdx + 1) % presets.length;
-            presetSwitchAt = now;
-            updateChip();
+          // Advance preset only if auto-cycle is on. Manual clicks reset
+          // the timer; sliders don't.
+          if (autoCycle && now - presetSwitchAt > PRESET_DURATION) {
+            selectPreset((presetIdx + 1) % presets.length);
           }
 
-          // Lerp live values toward current preset's targets. Exponential
-          // smoothing: alpha = 1 - exp(-dt / tau).
           const alpha = 1 - Math.exp(-dt / tau);
-          lerpToward(presets[presetIdx], alpha);
+          lerpToward(target, alpha);
 
           const t = (now - start) / 1000;
           gl.uniform1f(U.time, t);
@@ -570,6 +787,209 @@
         }
         requestAnimationFrame(tick);
       }
+
+      // ─────────────────────────────────────────────────────────────────
+      // Hero cloud — a single contained cloud rendered to its own canvas,
+      // sized to feel like the logo's cloud motif sitting under the brief.
+      // Clicking sends a ripple wave outward from the click point that
+      // distorts the cloud body and pulses brightness as it travels.
+      // ─────────────────────────────────────────────────────────────────
+      (() => {
+        const hero = document.getElementById('hero-cloud');
+        if (!hero) return;
+        const gl = hero.getContext('webgl', { alpha: true, antialias: true, premultipliedAlpha: false });
+        if (!gl) return;
+
+        const VS = `
+          attribute vec2 aPos;
+          void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
+        `;
+        const FS = `
+          precision mediump float;
+          uniform float uTime;
+          uniform vec2 uResolution;
+          // Ring-buffer of up to MAX_CLICKS recent clicks. Each is (uv.x,
+          // uv.y, age). age < 0 means slot is inactive.
+          uniform vec3 uClicks[4];
+          uniform vec3 uBase;       // navy interior shadow
+          uniform vec3 uHighlight;  // cream highlight
+          uniform vec3 uTint;       // gold tint on click pulse
+
+          float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+          float vnoise(vec2 p) {
+            vec2 i = floor(p);
+            vec2 f = fract(p);
+            vec2 u = f * f * (3.0 - 2.0 * f);
+            float a = hash(i);
+            float b = hash(i + vec2(1.0, 0.0));
+            float c = hash(i + vec2(0.0, 1.0));
+            float d = hash(i + vec2(1.0, 1.0));
+            return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+          }
+          float fbm(vec2 p) {
+            float v = 0.0;
+            float a = 0.5;
+            for (int i = 0; i < 5; i++) {
+              v += a * vnoise(p);
+              p = p * 2.07 + vec2(11.3, 7.9);
+              a *= 0.5;
+            }
+            return v;
+          }
+
+          void main() {
+            vec2 uv = gl_FragCoord.xy / uResolution.xy;
+            // Aspect-preserved centered coords for the mask so the cloud
+            // ellipse doesn't get squashed when the canvas resizes.
+            vec2 centered = (gl_FragCoord.xy - 0.5 * uResolution)
+                            / min(uResolution.x, uResolution.y);
+
+            // Cloud mask — wide-flat ellipse, soft edges. y stretched so the
+            // overall shape reads as cloud-like rather than circular.
+            float distMask = length(centered * vec2(0.78, 1.65));
+            float mask = smoothstep(0.52, 0.18, distMask);
+
+            // Accumulate ripple distortion + brightness pulse from any
+            // active clicks. Ring wave: the wavefront is the locus of
+            // points at distance age * speed from the click. Two effects:
+            //   - displacement of cloud sample point on the ring (visible
+            //     as the cloud's pattern compressing/expanding)
+            //   - additive brightness pulse on the ring (the gold tint)
+            vec2 distort = vec2(0.0);
+            float pulse = 0.0;
+            for (int i = 0; i < 4; i++) {
+              float age = uClicks[i].z;
+              if (age < 0.0 || age > 1.6) continue;
+              vec2 toClick = uv - uClicks[i].xy;
+              float d = length(toClick);
+              float speed = 0.55;
+              float ringDelta = d - age * speed;
+              float ring = exp(-ringDelta * ringDelta * 90.0);
+              float fade = exp(-age * 2.0);
+              distort += normalize(toClick + vec2(1e-6)) * ring * fade * 0.035;
+              pulse += ring * fade;
+            }
+
+            // Cloud noise — 2D is fine here, the canvas is a plane not a
+            // sphere so the equirect seams don't apply.
+            vec2 cloudUv = (uv + distort) * 3.8;
+            cloudUv += vec2(uTime * 0.04, uTime * 0.018);
+            float c1 = fbm(cloudUv);
+            float c2 = fbm(cloudUv * 1.9 + vec2(uTime * 0.025, 0.0));
+            float clouds = mix(c1, c2, 0.55);
+            clouds = smoothstep(0.36, 0.84, clouds);
+
+            vec3 color = mix(uBase, uHighlight, clouds);
+            color += uTint * pulse * 0.55;
+            // Alpha follows the elliptical MASK (so the cloud is always
+            // visible inside its silhouette), with cloud FBM modulating
+            // density and pulses briefly brightening. Without this, low-FBM
+            // pixels in the middle of the cloud would punch through to the
+            // page behind — invisible cloud.
+            float alpha = clamp(mask * (0.70 + 0.30 * clouds + pulse * 0.35), 0.0, 1.0);
+            gl_FragColor = vec4(color * alpha, alpha);
+          }
+        `;
+
+        const compile = (type, src) => {
+          const s = gl.createShader(type);
+          gl.shaderSource(s, src);
+          gl.compileShader(s);
+          if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+            console.error('hero cloud:', gl.getShaderInfoLog(s));
+            return null;
+          }
+          return s;
+        };
+        const vs = compile(gl.VERTEX_SHADER, VS);
+        const fs = compile(gl.FRAGMENT_SHADER, FS);
+        if (!vs || !fs) return;
+        const prog = gl.createProgram();
+        gl.attachShader(prog, vs);
+        gl.attachShader(prog, fs);
+        gl.linkProgram(prog);
+        gl.useProgram(prog);
+
+        const buf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+        gl.bufferData(gl.ARRAY_BUFFER,
+          new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]),
+          gl.STATIC_DRAW);
+        const aPos = gl.getAttribLocation(prog, 'aPos');
+        gl.enableVertexAttribArray(aPos);
+        gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+        // We're rendering with alpha — premultiplied since we output color *
+        // alpha. Standard "over" blend for compositing onto the page.
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+
+        const U = {
+          time: gl.getUniformLocation(prog, 'uTime'),
+          res: gl.getUniformLocation(prog, 'uResolution'),
+          clicks: gl.getUniformLocation(prog, 'uClicks'),
+          base: gl.getUniformLocation(prog, 'uBase'),
+          highlight: gl.getUniformLocation(prog, 'uHighlight'),
+          tint: gl.getUniformLocation(prog, 'uTint'),
+        };
+        // Logo palette — pulled from the SVG fills.
+        gl.uniform3f(U.base, 0.145, 0.239, 0.447);      // #253D72 navy
+        gl.uniform3f(U.highlight, 0.941, 0.886, 0.788); // #F0E2C9 cream
+        gl.uniform3f(U.tint, 0.651, 0.506, 0.208);      // #A68135 gold
+
+        // Click ring buffer — 4 slots, each (uv.x, uv.y, age). age < 0 = empty.
+        const clicks = new Float32Array(12);
+        for (let i = 0; i < 4; i++) clicks[i * 3 + 2] = -1;
+        let writeIdx = 0;
+
+        hero.addEventListener('pointerdown', (e) => {
+          const rect = hero.getBoundingClientRect();
+          // WebGL has origin at bottom-left; CSS at top-left. Flip Y.
+          const u = (e.clientX - rect.left) / rect.width;
+          const v = 1 - (e.clientY - rect.top) / rect.height;
+          clicks[writeIdx * 3 + 0] = u;
+          clicks[writeIdx * 3 + 1] = v;
+          clicks[writeIdx * 3 + 2] = 0;
+          writeIdx = (writeIdx + 1) % 4;
+        });
+
+        function resize() {
+          const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+          const w = Math.round(hero.clientWidth * dpr);
+          const h = Math.round(hero.clientHeight * dpr);
+          if (hero.width !== w || hero.height !== h) {
+            hero.width = w;
+            hero.height = h;
+            gl.viewport(0, 0, w, h);
+          }
+        }
+        resize();
+        const ro = new ResizeObserver(resize);
+        ro.observe(hero);
+
+        const start = performance.now();
+        let prev = start;
+        function tick(now) {
+          const dt = Math.min(0.05, (now - prev) / 1000);
+          prev = now;
+
+          // Age all active clicks; retire ones older than the ring lifetime.
+          for (let i = 0; i < 4; i++) {
+            const age = clicks[i * 3 + 2];
+            if (age >= 0) {
+              const next = age + dt;
+              clicks[i * 3 + 2] = next > 1.6 ? -1 : next;
+            }
+          }
+
+          gl.uniform1f(U.time, (now - start) / 1000);
+          gl.uniform2f(U.res, hero.width, hero.height);
+          gl.uniform3fv(U.clicks, clicks);
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+          requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+      })();
     </script>
   </body>
 </html>
