@@ -78,7 +78,7 @@
     {
       "id": "hero_table",
       "url": "/heroes/hero_table.glb",
-      "interactive": true,
+      "interactive": false,
       "placements": [
         {
           "state": "both",

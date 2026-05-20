@@ -17,6 +17,23 @@ import { HERO_ID_KEY, tagInteractive, tagState, type StateTag } from '../scene/t
 //     ]
 //   }
 //
+// `interactive` is the binary category lever — every hero is one of two kinds:
+//
+//   - INTERACTIVE (`interactive: true` or omitted) — the end user can hover
+//     and click them. Hover highlight, hover label, click rules in the
+//     interaction engine, cloth-grab system all see them.
+//
+//   - SET (`interactive: false`) — fixtures + dressing. The table, the
+//     chair-when-it's-just-furniture, the cassette case. Pointer raycasts
+//     skip them entirely so the viewer's cursor passes through to whatever
+//     IS interactive behind them. The hero still loads, gets a state tag,
+//     and shows up in heroLookup so the **dev panel + gizmo + save flow
+//     continue to work** behind the scenes — the binary only controls the
+//     end-user-facing interaction surface.
+//
+// When in doubt: ask "should an unsuspecting viewer be able to click this and
+// have something happen?" If no → `interactive: false`.
+//
 // Same hero can be placed at multiple positions across states. material_variant
 // references a KHR_materials_variants name baked into the glb — applied when
 // the runtime's variant-switching support lands (currently stashed on userData
