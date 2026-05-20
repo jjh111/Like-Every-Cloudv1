@@ -36,8 +36,14 @@ export function createLogoBadge(opts: { href?: string; height?: number } = {}): 
     'padding: 6px 10px',
     'box-sizing: border-box',
     'user-select: none',
-    'pointer-events: ' + (opts.href ? 'auto' : 'none'),
-    'transition: transform 200ms ease, background 200ms ease',
+    // Pointer-events ON unconditionally so the hover-expand can fire even
+    // when the badge isn't clickable. The img inside still has pointer-
+    // events: none so the wrapper owns all hover state.
+    'pointer-events: auto',
+    // Grow from the anchored corner outwards, not from center — keeps the
+    // expanded badge from drifting off-screen on the left/top edge.
+    'transform-origin: top left',
+    'transition: transform 220ms ease, background 220ms ease',
   ].join('; ');
 
   const img = document.createElement('img');
@@ -49,16 +55,17 @@ export function createLogoBadge(opts: { href?: string; height?: number } = {}): 
   img.style.cssText = 'height: 100%; width: auto; display: block; pointer-events: none;';
   wrapper.appendChild(img);
 
-  if (opts.href) {
-    wrapper.addEventListener('pointerenter', () => {
-      wrapper.style.background = 'rgba(255, 255, 255, 0.28)';
-      wrapper.style.transform = 'scale(1.04)';
-    });
-    wrapper.addEventListener('pointerleave', () => {
-      wrapper.style.background = 'rgba(255, 255, 255, 0.18)';
-      wrapper.style.transform = '';
-    });
-  }
+  // Hover-expand by 50% — pure visual reward; cursor stays default unless a
+  // link is wired. Clickable variant also gets a subtle background lift so
+  // it reads as a button on hover instead of just a bigger logo.
+  wrapper.addEventListener('pointerenter', () => {
+    wrapper.style.transform = 'scale(1.5)';
+    if (opts.href) wrapper.style.background = 'rgba(255, 255, 255, 0.28)';
+  });
+  wrapper.addEventListener('pointerleave', () => {
+    wrapper.style.transform = '';
+    if (opts.href) wrapper.style.background = 'rgba(255, 255, 255, 0.18)';
+  });
 
   document.body.appendChild(wrapper);
 }

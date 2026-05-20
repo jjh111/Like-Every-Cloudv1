@@ -9,7 +9,9 @@ export function createTracksBar(audio: AudioManager, assets: AudioAsset[]): void
   const wrapper = document.createElement('div');
   wrapper.style.cssText = [
     'position: fixed',
-    'bottom: 16px',
+    // Sits above the audio controls pill (bottom: 16px, height ~44px).
+    // 16 + 44 + 12px gap ≈ 72px.
+    'bottom: 72px',
     'left: 50%',
     'transform: translateX(-50%)',
     'display: flex',

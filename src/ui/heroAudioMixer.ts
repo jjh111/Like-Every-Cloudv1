@@ -95,9 +95,11 @@ export function createHeroAudioMixer(deps: HeroAudioMixerDeps): void {
   panel.style.cssText = [
     'position: fixed',
     // Sits below the top-left logo badge (created by createLogoBadge). The
-    // badge is ~48px tall + 16px top offset ≈ 64px total footprint; an extra
-    // ~16px gap keeps the two visually separated.
-    'top: 80px',
+    // badge is ~48px tall at rest + 16px top offset, but it scales to 1.5×
+    // on hover (≈72px tall, growing down-right from its top-left corner) —
+    // so the mixer needs ~88px clearance plus a small gap to avoid being
+    // obscured during the hover-expand.
+    'top: 104px',
     'left: 16px',
     'padding: 10px 14px 12px',
     'background: rgba(15, 15, 15, 0.78)',

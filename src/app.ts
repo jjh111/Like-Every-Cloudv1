@@ -32,6 +32,9 @@ import { createTracksBar } from './ui/tracksBar';
 import { createHeroStatePanel, buildHeroDropdownMap } from './ui/heroStatePanel';
 import { createHeroAudioMixer } from './ui/heroAudioMixer';
 import { createLogoBadge } from './ui/logoBadge';
+import { HoverHighlight } from './scene/hoverHighlight';
+import { ClothPatch } from './scene/clothPatch';
+import { ClothGrabController } from './interaction/clothGrab';
 import { createHoverLabel } from './ui/hoverLabel';
 import { createViewToggle } from './ui/viewToggle';
 import { createDevToggle } from './ui/devToggle';
@@ -547,6 +550,54 @@ export async function start(container: HTMLElement): Promise<void> {
   });
   engine.arm();
 
+  // ── Hover + selection highlight ─────────────────────────────────────
+  // Always-on visual feedback: emissive boost on hover, stronger boost +
+  // inverted-hull outline on click-selected hero. Independent of the rules
+  // engine — even heroes with no click rule (placeholder spheres, cloth
+  // pieces) still light up on hover.
+  new HoverHighlight({ pointer });
+
+  // ── Cloth sim demo ──────────────────────────────────────────────────
+  // One placeholder cloth hung roughly in front of the table — pin row at
+  // table-top height, hangs down to the floor. Verlet sim w/ sum-of-sines
+  // wind. Drag a point to play with it (mouse OR touch). Position is hand-
+  // tuned for the current table placement (-0.381, -0.357, -1.614) and
+  // will need re-aiming when the real table-front replacement lands; for
+  // the show-off demo it just needs to be visible + interactive.
+  const tableSkirt = new ClothPatch({
+    pinStart: new Vector3(-0.95, 0.32, -1.05),
+    pinEnd: new Vector3(0.15, 0.32, -1.05),
+    height: 0.65,
+    cols: 14,
+    rows: 10,
+    windStrength: 1.4,
+    gravity: 3.0,
+    floorY: -0.4,
+  });
+  tableSkirt.mesh.userData.hero_id = 'cloth_table_skirt';
+  tableSkirt.mesh.userData.interactive = true;
+  contentRoot.add(tableSkirt.mesh);
+
+  // Mute OrbitControls during cloth grab by reaching into whatever camera
+  // is active — mirrors the gizmo-drag suppression pattern below.
+  const cameraControlsToggle = {
+    get enabled(): boolean {
+      const c = (activeCamera as unknown as { controls?: { enabled: boolean } }).controls;
+      return c?.enabled ?? true;
+    },
+    set enabled(v: boolean) {
+      const c = (activeCamera as unknown as { controls?: { enabled: boolean } }).controls;
+      if (c) c.enabled = v;
+    },
+  };
+  const clothGrab = new ClothGrabController({
+    camera,
+    domElement: renderer.domElement,
+    controlsToggle: cameraControlsToggle,
+  });
+  clothGrab.register(tableSkirt);
+  clothGrab.attach();
+
   // ── Gizmo ───────────────────────────────────────────────────────────
   // ONE TransformControls. Mode toggle lives in the dev panel "edit" folder:
   // translate by default, switch to rotate when needed (E key as shortcut).
@@ -755,9 +806,10 @@ export async function start(container: HTMLElement): Promise<void> {
   });
 
   // ── UI ──────────────────────────────────────────────────────────────
-  // Player-facing surfaces (always visible): mute pill, track inventory,
-  // view toggle. The dev surfaces (lil-gui panel, per-hero state radios,
-  // hero-id hover chip, camera anchor markers) only show under `?dev=1`.
+  // Player-facing surfaces (always visible): logo badge, mute pill + master
+  // volume, view toggle. The dev surfaces (lil-gui panel, per-hero state
+  // radios, hero-id hover chip, camera anchor markers, the verbose tracks
+  // bar listing every audio asset) only show under `?dev=1`.
   const toggleView = (): void => setView(getView() === 'exterior' ? 'interior' : 'exterior');
 
   // Top-left brand badge — present in both demo and dev views. The hero
@@ -765,8 +817,12 @@ export async function start(container: HTMLElement): Promise<void> {
   createLogoBadge();
 
   createAudioControls(audio);
-  createTracksBar(audio, AUDIO_ASSETS);
   createViewToggle(getView, toggleView);
+
+  // Tracks bar lists every preloaded audio asset as audition chips + shows
+  // per-channel "now playing" status. Useful for authoring, noisy for
+  // viewers — gated to dev mode.
+  if (devMode) createTracksBar(audio, AUDIO_ASSETS);
 
   // Small ⚙ button top-right in demo view → opens dev view via ?dev=1.
   // Not shown in dev view because lil-gui already lives top-right there.
@@ -905,6 +961,7 @@ export async function start(container: HTMLElement): Promise<void> {
     active.update(stateController.context);
     activeCamera.update(dt);
     activeAtmosphere.update(atmosphereCtx, dt);
+    tableSkirt.tick(dt);
     // Mirror any gizmo-driven marker changes into the source-of-truth
     // vectors that the tween + save flow read.
     cameraHandles.syncToSources();

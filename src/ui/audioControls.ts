@@ -12,7 +12,7 @@ export function createAudioControls(audio: AudioManager): void {
   const wrapper = document.createElement('div');
   wrapper.style.cssText = [
     'position: fixed',
-    'bottom: 86px',
+    'bottom: 16px',
     'left: 50%',
     'transform: translateX(-50%)',
     'display: flex',
