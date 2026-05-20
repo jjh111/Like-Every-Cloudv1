@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Like Every Cloud — project brief</title>
+    <link rel="icon" href="/like-every-cloud.svg" />
+    <style>
+      :root {
+        /* Anchored to the scene's sky gradient + the warm earth-tone text
+           the loader overlay uses. Anything inside the brief should feel like
+           it could be a panel inside the live scene, not a separate website. */
+        --ink: #3a2f22;
+        --ink-soft: #5a4a35;
+        --rule: rgba(58, 47, 34, 0.18);
+        --paper: rgba(254, 245, 224, 0.88);
+        --paper-edge: rgba(58, 47, 34, 0.12);
+      }
+      html, body {
+        margin: 0;
+        padding: 0;
+        /* min-height so a short body still covers the viewport; height (or
+           height: 100%) would clamp the body and force inner scrolling
+           instead of natural window scrolling. */
+        min-height: 100%;
+        font-family: system-ui, -apple-system, "SF Pro Text", "Segoe UI", sans-serif;
+        color: var(--ink);
+        /* Static gradient under the canvas as a fallback in case WebGL fails
+           or while it's compiling. Matches the scene's sky exactly. */
+        background: linear-gradient(
+          to bottom,
+          #a8c8e8 0%,
+          #dec699 65%,
+          #c9a878 100%
+        );
+        overflow-x: hidden;
+      }
+      canvas#sky {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 0;
+        display: block;
+        /* Pointer events pass through so the page scrolls normally. */
+        pointer-events: none;
+      }
+
+      /* Soft inner vignette gives the page some depth without darkening the
+         clouds themselves — the canvas can stay vivid and the text reads
+         against a calmer corner. */
+      .vignette {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+        background: radial-gradient(
+          ellipse at center,
+          rgba(0, 0, 0, 0) 30%,
+          rgba(0, 0, 0, 0.18) 100%
+        );
+      }
+
+      main {
+        position: relative;
+        z-index: 1;
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 88px 32px 120px;
+        min-height: 100vh;
+        box-sizing: border-box;
+      }
+
+      .back {
+        position: fixed;
+        top: 20px;
+        right: 24px;
+        z-index: 2;
+        font: 12px/1 ui-monospace, Menlo, monospace;
+        text-decoration: none;
+        color: var(--ink);
+        padding: 8px 14px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.55);
+        backdrop-filter: blur(6px);
+        border: 1px solid rgba(255, 255, 255, 0.7);
+        transition: background 180ms ease, transform 180ms ease;
+        letter-spacing: 0.05em;
+      }
+      .back:hover {
+        background: rgba(255, 255, 255, 0.85);
+        transform: translateY(-1px);
+      }
+
+      .logo {
+        display: block;
+        width: 280px;
+        max-width: 60vw;
+        margin: 0 auto 28px;
+        height: auto;
+        /* Faint paper card behind so the wordmark's dark navy doesn't
+           muddle into the bluer parts of the noisy sky. */
+        padding: 14px 20px;
+        background: rgba(255, 255, 255, 0.18);
+        border-radius: 18px;
+        backdrop-filter: blur(6px);
+        border: 1px solid rgba(255, 255, 255, 0.32);
+        box-sizing: border-box;
+      }
+
+      h1 {
+        font: 300 36px/1.15 "Cormorant Garamond", "Iowan Old Style", Georgia, serif;
+        letter-spacing: 0.02em;
+        text-align: center;
+        margin: 0 0 8px;
+        color: var(--ink);
+      }
+      .subtitle {
+        text-align: center;
+        font: 11px/1 ui-monospace, Menlo, monospace;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+        margin: 0 0 44px;
+      }
+
+      .lead {
+        /* Slightly milky panel so a paragraph at this length stays legible
+           even when the noisy sky behind has high-contrast cloud patches. */
+        font: 17px/1.65 "Iowan Old Style", "Georgia", "Cormorant Garamond", serif;
+        color: var(--ink);
+        background: var(--paper);
+        border: 1px solid var(--paper-edge);
+        padding: 26px 30px;
+        border-radius: 14px;
+        margin: 0 0 36px;
+        backdrop-filter: blur(8px);
+      }
+      .lead em {
+        font-style: italic;
+        color: var(--ink);
+      }
+
+      .pillars {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 14px;
+        margin: 0 0 40px;
+      }
+      .pillar {
+        background: rgba(255, 255, 255, 0.32);
+        backdrop-filter: blur(6px);
+        border: 1px solid rgba(255, 255, 255, 0.45);
+        border-radius: 12px;
+        padding: 16px 18px;
+      }
+      .pillar h3 {
+        font: 11px/1 ui-monospace, Menlo, monospace;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+        margin: 0 0 8px;
+      }
+      .pillar p {
+        font: 14px/1.5 "Iowan Old Style", Georgia, serif;
+        margin: 0;
+        color: var(--ink);
+      }
+      @media (max-width: 640px) {
+        .pillars { grid-template-columns: 1fr; }
+      }
+
+      /* The preset chip in the corner is the small "look behind you" affordance.
+         It moves with the sky so visitors notice the background is alive,
+         not a static gradient. */
+      .preset {
+        position: fixed;
+        bottom: 18px;
+        left: 20px;
+        z-index: 2;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 10px 14px;
+        background: rgba(255, 255, 255, 0.55);
+        backdrop-filter: blur(8px);
+        border: 1px solid rgba(255, 255, 255, 0.65);
+        border-radius: 12px;
+        font: 11px/1.3 ui-monospace, Menlo, monospace;
+        color: var(--ink);
+        min-width: 168px;
+        user-select: none;
+        pointer-events: none;
+      }
+      .preset .name {
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        font-size: 10.5px;
+      }
+      .preset .meta {
+        opacity: 0.7;
+        font-size: 10px;
+      }
+      .preset .dots {
+        display: flex;
+        gap: 5px;
+        margin-top: 4px;
+      }
+      .preset .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: rgba(58, 47, 34, 0.2);
+        transition: background 240ms ease, transform 240ms ease;
+      }
+      .preset .dot.active {
+        background: var(--ink);
+        transform: scale(1.18);
+      }
+
+      .footer {
+        font: 11px/1.5 ui-monospace, Menlo, monospace;
+        color: var(--ink-soft);
+        text-align: center;
+        letter-spacing: 0.08em;
+        opacity: 0.75;
+      }
+      .footer a {
+        color: var(--ink);
+        text-decoration: none;
+        border-bottom: 1px solid var(--rule);
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="sky"></canvas>
+    <div class="vignette"></div>
+    <a class="back" href="/">↗ live scene</a>
+
+    <main>
+      <img class="logo" src="/like-every-cloud.svg" alt="Like Every Cloud" />
+      <h1>Like Every Cloud</h1>
+      <div class="subtitle">a Chadian cassette shop · past + present</div>
+
+      <p class="lead">
+        Like Every Cloud is an interactive 3D scene built around a small
+        cassette shop in Chad — a workspace where the same walls hold two
+        eras at once. In the past, the shop ran on tape: a stack of
+        handwritten cassettes, a boombox, a generator outside humming
+        through the afternoon. In the present, the same room is given over
+        to sewing. The cassettes are still there, but it's the sewing
+        machine's soft purr that now structures the air. You move between
+        the two states the way the day moves between weather — slowly, by
+        feeling. The work exists to preserve rare Chadian and Sudanese
+        recordings inside the place they belong, and to give a visitor
+        somewhere to <em>be</em> for a while: not a tour, not a puzzle,
+        just a room with a long memory and the music still playing.
+      </p>
+
+      <div class="pillars">
+        <div class="pillar">
+          <h3>Preserve</h3>
+          <p>Rare cassette music from Chad and Sudan, played back through the boombox where it once lived.</p>
+        </div>
+        <div class="pillar">
+          <h3>Vibe</h3>
+          <p>A photogrammetric room, dust in the morning light, the small loop of a fan or a stitching machine.</p>
+        </div>
+        <div class="pillar">
+          <h3>Explore time</h3>
+          <p>Slip between past and present in the same walls. What stays. What changes. What still hums.</p>
+        </div>
+      </div>
+
+      <div class="footer">
+        Built with Three.js · WebGL clouds rendered live above
+      </div>
+    </main>
+
+    <aside class="preset" aria-hidden="true">
+      <span class="name" id="preset-name">drift</span>
+      <span class="meta" id="preset-meta">density 0.55 · wind east</span>
+      <div class="dots" id="preset-dots"></div>
+    </aside>
+
+    <script>
+      // ─────────────────────────────────────────────────────────────────
+      // Noisy cloud sky — fullscreen WebGL fragment shader cycling through
+      // a handful of named presets. Each preset is a snapshot of what the
+      // shader can do (density / drift speed / palette) so the page itself
+      // demonstrates the system rather than describing it.
+      //
+      // No build step, no module imports — a single self-contained file
+      // so the brief can sit in public/ and ship verbatim.
+      // ─────────────────────────────────────────────────────────────────
+
+      const canvas = document.getElementById('sky');
+      const gl = canvas.getContext('webgl', { alpha: false, antialias: false, premultipliedAlpha: false });
+      if (!gl) {
+        // Graceful fallback: the body's CSS gradient stays visible, the
+        // brief still reads cleanly.
+        canvas.style.display = 'none';
+      } else {
+        boot(gl);
+      }
+
+      function boot(gl) {
+        const VS = `
+          attribute vec2 aPos;
+          void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
+        `;
+        const FS = `
+          precision mediump float;
+          uniform float uTime;
+          uniform vec2 uResolution;
+          uniform float uDensity;
+          uniform float uSpeed;
+          uniform float uMix;
+          uniform vec3 uSkyTop;
+          uniform vec3 uSkyBottom;
+          uniform vec3 uCloudColor;
+          uniform vec2 uWind;
+
+          // Hash → smooth value noise → FBM. Classic stack. Five octaves
+          // hard-coded so the loop unrolls cleanly across drivers.
+          float hash(vec2 p) {
+            return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+          }
+          float vnoise(vec2 p) {
+            vec2 i = floor(p);
+            vec2 f = fract(p);
+            vec2 u = f * f * (3.0 - 2.0 * f);
+            float a = hash(i);
+            float b = hash(i + vec2(1.0, 0.0));
+            float c = hash(i + vec2(0.0, 1.0));
+            float d = hash(i + vec2(1.0, 1.0));
+            return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+          }
+          float fbm(vec2 p) {
+            float v = 0.0;
+            float a = 0.5;
+            for (int i = 0; i < 5; i++) {
+              v += a * vnoise(p);
+              p = p * 2.07 + vec2(11.3, 7.9);
+              a *= 0.5;
+            }
+            return v;
+          }
+
+          void main() {
+            vec2 uv = gl_FragCoord.xy / uResolution.xy;
+            vec2 p = (gl_FragCoord.xy - 0.5 * uResolution) / min(uResolution.x, uResolution.y);
+            p *= 2.5;
+            // Wind drift — two layers at different speeds so the cloud
+            // field looks layered instead of one flat sheet sliding past.
+            p += uWind * uTime * uSpeed * 0.06;
+            float c1 = fbm(p);
+            float c2 = fbm(p * 1.7 + vec2(uTime * uSpeed * 0.03, 0.0));
+            float clouds = mix(c1, c2, 0.5);
+            // Density widens the cloud band; smoothstep gives soft cloud
+            // edges instead of a binary cutoff.
+            clouds = smoothstep(0.35, 0.82, clouds * (0.7 + uDensity));
+            vec3 sky = mix(uSkyBottom, uSkyTop, smoothstep(0.0, 1.0, uv.y));
+            vec3 color = mix(sky, uCloudColor, clouds * uMix);
+            // Gentle radial dim so corners don't outshine the text panel.
+            float vig = smoothstep(1.3, 0.45, length(uv - 0.5));
+            color *= 0.85 + 0.15 * vig;
+            gl_FragColor = vec4(color, 1.0);
+          }
+        `;
+
+        const compile = (type, src) => {
+          const s = gl.createShader(type);
+          gl.shaderSource(s, src);
+          gl.compileShader(s);
+          if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+            console.error(gl.getShaderInfoLog(s));
+            return null;
+          }
+          return s;
+        };
+        const vs = compile(gl.VERTEX_SHADER, VS);
+        const fs = compile(gl.FRAGMENT_SHADER, FS);
+        if (!vs || !fs) return;
+        const prog = gl.createProgram();
+        gl.attachShader(prog, vs);
+        gl.attachShader(prog, fs);
+        gl.linkProgram(prog);
+        gl.useProgram(prog);
+
+        // Two triangles covering NDC space.
+        const buf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+        gl.bufferData(
+          gl.ARRAY_BUFFER,
+          new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]),
+          gl.STATIC_DRAW,
+        );
+        const aPos = gl.getAttribLocation(prog, 'aPos');
+        gl.enableVertexAttribArray(aPos);
+        gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+        const U = {
+          time: gl.getUniformLocation(prog, 'uTime'),
+          res: gl.getUniformLocation(prog, 'uResolution'),
+          density: gl.getUniformLocation(prog, 'uDensity'),
+          speed: gl.getUniformLocation(prog, 'uSpeed'),
+          mix: gl.getUniformLocation(prog, 'uMix'),
+          skyTop: gl.getUniformLocation(prog, 'uSkyTop'),
+          skyBottom: gl.getUniformLocation(prog, 'uSkyBottom'),
+          cloudColor: gl.getUniformLocation(prog, 'uCloudColor'),
+          wind: gl.getUniformLocation(prog, 'uWind'),
+        };
+
+        // ─── presets ───────────────────────────────────────────────────
+        // Each preset is a complete snapshot of the cloud system. Choose
+        // names that read at a glance — visitors clock the chip in the
+        // corner without needing a legend.
+        const presets = [
+          {
+            name: 'drift',
+            meta: 'density 0.55 · wind east',
+            density: 0.55, speed: 0.35, mix: 0.85,
+            skyTop: [0.66, 0.78, 0.91],     // #a8c8e8 — the scene's sky-top
+            skyBottom: [0.79, 0.66, 0.47],  // #c9a878 — the scene's earth
+            cloudColor: [0.98, 0.94, 0.85],
+            wind: [1.0, 0.15],
+          },
+          {
+            name: 'haze',
+            meta: 'density 0.72 · still',
+            density: 0.72, speed: 0.05, mix: 0.78,
+            skyTop: [0.83, 0.81, 0.74],
+            skyBottom: [0.92, 0.85, 0.72],
+            cloudColor: [0.97, 0.92, 0.83],
+            wind: [0.2, 0.05],
+          },
+          {
+            name: 'dawn',
+            meta: 'density 0.32 · wind south',
+            density: 0.32, speed: 0.22, mix: 0.7,
+            skyTop: [0.95, 0.74, 0.66],
+            skyBottom: [0.97, 0.84, 0.62],
+            cloudColor: [1.0, 0.86, 0.62],
+            wind: [-0.35, -0.85],
+          },
+          {
+            name: 'storm',
+            meta: 'density 0.92 · gusty',
+            density: 0.92, speed: 1.1, mix: 0.95,
+            skyTop: [0.42, 0.46, 0.51],
+            skyBottom: [0.6, 0.55, 0.48],
+            cloudColor: [0.42, 0.42, 0.44],
+            wind: [1.2, -0.6],
+          },
+          {
+            name: 'open',
+            meta: 'density 0.2 · slow',
+            density: 0.2, speed: 0.12, mix: 0.55,
+            skyTop: [0.56, 0.72, 0.88],
+            skyBottom: [0.79, 0.83, 0.86],
+            cloudColor: [1.0, 0.98, 0.93],
+            wind: [0.4, 0.1],
+          },
+        ];
+
+        // ─── preset cycling ────────────────────────────────────────────
+        const PRESET_DURATION = 7000; // each preset visible for this long
+        let presetIdx = 0;
+        let presetSwitchAt = performance.now();
+
+        // Live (currently-rendered) values lerp toward the target preset
+        // each frame. exponential smoothing — natural ease-in/ease-out
+        // without tracking a separate transition timer.
+        const live = clonePreset(presets[0]);
+        const tau = 0.9; // seconds — bigger = slower morph
+
+        function clonePreset(p) {
+          return {
+            density: p.density,
+            speed: p.speed,
+            mix: p.mix,
+            skyTop: p.skyTop.slice(),
+            skyBottom: p.skyBottom.slice(),
+            cloudColor: p.cloudColor.slice(),
+            wind: p.wind.slice(),
+          };
+        }
+        function lerp(a, b, t) { return a + (b - a) * t; }
+        function lerpVec(a, b, t) {
+          for (let i = 0; i < a.length; i++) a[i] = lerp(a[i], b[i], t);
+        }
+        function lerpToward(target, alpha) {
+          live.density = lerp(live.density, target.density, alpha);
+          live.speed = lerp(live.speed, target.speed, alpha);
+          live.mix = lerp(live.mix, target.mix, alpha);
+          lerpVec(live.skyTop, target.skyTop, alpha);
+          lerpVec(live.skyBottom, target.skyBottom, alpha);
+          lerpVec(live.cloudColor, target.cloudColor, alpha);
+          lerpVec(live.wind, target.wind, alpha);
+        }
+
+        // ─── chip / dots ───────────────────────────────────────────────
+        const presetName = document.getElementById('preset-name');
+        const presetMeta = document.getElementById('preset-meta');
+        const dotsRoot = document.getElementById('preset-dots');
+        const dotEls = presets.map((_, i) => {
+          const d = document.createElement('span');
+          d.className = 'dot' + (i === 0 ? ' active' : '');
+          dotsRoot.appendChild(d);
+          return d;
+        });
+        function updateChip() {
+          const p = presets[presetIdx];
+          presetName.textContent = p.name;
+          presetMeta.textContent = p.meta;
+          dotEls.forEach((d, i) => d.classList.toggle('active', i === presetIdx));
+        }
+        updateChip();
+
+        // ─── resize ────────────────────────────────────────────────────
+        function resize() {
+          // Clamp DPR so retina + 4K screens don't burn the GPU for a
+          // background animation that doesn't need pixel-perfect fidelity.
+          const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+          const w = Math.round(window.innerWidth * dpr);
+          const h = Math.round(window.innerHeight * dpr);
+          if (canvas.width !== w || canvas.height !== h) {
+            canvas.width = w;
+            canvas.height = h;
+            gl.viewport(0, 0, w, h);
+          }
+        }
+        resize();
+        window.addEventListener('resize', resize);
+
+        // ─── render loop ───────────────────────────────────────────────
+        const start = performance.now();
+        let prev = start;
+        function tick(now) {
+          const dt = Math.min(0.05, (now - prev) / 1000); // cap big tab-switch dts
+          prev = now;
+
+          // Swap preset on schedule.
+          if (now - presetSwitchAt > PRESET_DURATION) {
+            presetIdx = (presetIdx + 1) % presets.length;
+            presetSwitchAt = now;
+            updateChip();
+          }
+
+          // Lerp live values toward current preset's targets. Exponential
+          // smoothing: alpha = 1 - exp(-dt / tau).
+          const alpha = 1 - Math.exp(-dt / tau);
+          lerpToward(presets[presetIdx], alpha);
+
+          const t = (now - start) / 1000;
+          gl.uniform1f(U.time, t);
+          gl.uniform2f(U.res, canvas.width, canvas.height);
+          gl.uniform1f(U.density, live.density);
+          gl.uniform1f(U.speed, live.speed);
+          gl.uniform1f(U.mix, live.mix);
+          gl.uniform3fv(U.skyTop, live.skyTop);
+          gl.uniform3fv(U.skyBottom, live.skyBottom);
+          gl.uniform3fv(U.cloudColor, live.cloudColor);
+          gl.uniform2fv(U.wind, live.wind);
+
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+          requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+      }
+    </script>
+  </body>
+</html>
