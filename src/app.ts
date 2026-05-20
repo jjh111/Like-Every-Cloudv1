@@ -557,26 +557,75 @@ export async function start(container: HTMLElement): Promise<void> {
   // pieces) still light up on hover.
   new HoverHighlight({ pointer });
 
-  // ── Cloth sim demo ──────────────────────────────────────────────────
-  // One placeholder cloth hung roughly in front of the table — pin row at
-  // table-top height, hangs down to the floor. Verlet sim w/ sum-of-sines
-  // wind. Drag a point to play with it (mouse OR touch). Position is hand-
-  // tuned for the current table placement (-0.381, -0.357, -1.614) and
-  // will need re-aiming when the real table-front replacement lands; for
-  // the show-off demo it just needs to be visible + interactive.
-  const tableSkirt = new ClothPatch({
-    pinStart: new Vector3(-0.95, 0.32, -1.05),
-    pinEnd: new Vector3(0.15, 0.32, -1.05),
-    height: 0.65,
-    cols: 14,
-    rows: 10,
-    windStrength: 1.4,
-    gravity: 3.0,
-    floorY: -0.4,
-  });
-  tableSkirt.mesh.userData.hero_id = 'cloth_table_skirt';
-  tableSkirt.mesh.userData.interactive = true;
-  contentRoot.add(tableSkirt.mesh);
+  // ── Cloth sim on the table ──────────────────────────────────────────
+  // Two cloth patches replace the static fabric meshes that used to ship
+  // inside hero_table.glb (FrontCloth-table_hero, Sidecloth-table_hero
+  // were removed in Blender + re-exported). Pin lines are derived from
+  // the live table's world bbox so any future dev-panel reposition of
+  // the table carries the cloths along without code changes.
+  //
+  // Front cloth: pinned along the table's front edge (the +Z face that
+  //              faces the doorway camera) — spans the full table width.
+  // Side cloth:  pinned along the table's right edge (+X face) — spans
+  //              the full table depth.
+  //
+  // 4mm forward / sideways inset on the pin line so the cloth doesn't
+  // z-fight the table top at the seam.
+  const cloths: ClothPatch[] = [];
+  const tableRoot = heroLookup.get('hero_table');
+  if (tableRoot) {
+    const tableBox = new Box3().setFromObject(tableRoot);
+    const topY = tableBox.max.y;
+    const minX = tableBox.min.x;
+    const maxX = tableBox.max.x;
+    const minZ = tableBox.min.z;
+    const maxZ = tableBox.max.z;
+    // floor a touch below the table-bottom so the cloth can settle to a
+    // natural drape (legs go nearly to ground).
+    const floorY = tableBox.min.y - 0.02;
+
+    // Pin lines are pulled in 1cm from the geometric edge so the cloth
+    // overlap reads as the cloth draping from the top instead of clipping
+    // through the table top corner.
+    const inset = 0.01;
+    const frontPinZ = maxZ - inset;
+    const sidePinX = maxX - inset;
+    // Vertical drop: from table-top down to a hair above floor (let the
+    // last row dangle into the floor slightly so it reads as resting).
+    const hangHeight = topY - floorY - 0.02;
+
+    const frontCloth = new ClothPatch({
+      pinStart: new Vector3(minX + inset, topY, frontPinZ),
+      pinEnd:   new Vector3(maxX - inset, topY, frontPinZ),
+      height: hangHeight,
+      cols: 14,
+      rows: 10,
+      windStrength: 1.0,
+      gravity: 3.0,
+      floorY,
+    });
+    frontCloth.mesh.userData.hero_id = 'cloth_table_front';
+    frontCloth.mesh.userData.interactive = true;
+    contentRoot.add(frontCloth.mesh);
+    cloths.push(frontCloth);
+
+    const sideCloth = new ClothPatch({
+      pinStart: new Vector3(sidePinX, topY, minZ + inset),
+      pinEnd:   new Vector3(sidePinX, topY, maxZ - inset),
+      height: hangHeight,
+      cols: 12,
+      rows: 10,
+      windStrength: 0.8,
+      gravity: 3.0,
+      floorY,
+    });
+    sideCloth.mesh.userData.hero_id = 'cloth_table_side';
+    sideCloth.mesh.userData.interactive = true;
+    contentRoot.add(sideCloth.mesh);
+    cloths.push(sideCloth);
+  } else {
+    console.warn('[cloth] hero_table not found — skipping cloth instantiation');
+  }
 
   // Mute OrbitControls during cloth grab by reaching into whatever camera
   // is active — mirrors the gizmo-drag suppression pattern below.
@@ -595,7 +644,7 @@ export async function start(container: HTMLElement): Promise<void> {
     domElement: renderer.domElement,
     controlsToggle: cameraControlsToggle,
   });
-  clothGrab.register(tableSkirt);
+  for (const cloth of cloths) clothGrab.register(cloth);
   clothGrab.attach();
 
   // ── Gizmo ───────────────────────────────────────────────────────────
@@ -961,7 +1010,7 @@ export async function start(container: HTMLElement): Promise<void> {
     active.update(stateController.context);
     activeCamera.update(dt);
     activeAtmosphere.update(atmosphereCtx, dt);
-    tableSkirt.tick(dt);
+    for (const cloth of cloths) cloth.tick(dt);
     // Mirror any gizmo-driven marker changes into the source-of-truth
     // vectors that the tween + save flow read.
     cameraHandles.syncToSources();
