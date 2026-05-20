@@ -878,8 +878,9 @@ export async function start(container: HTMLElement): Promise<void> {
   const toggleView = (): void => setView(getView() === 'exterior' ? 'interior' : 'exterior');
 
   // Top-left brand badge — present in both demo and dev views. The hero
-  // audio mixer (dev-only) tucks under this when it mounts.
-  createLogoBadge();
+  // audio mixer (dev-only) tucks under this when it mounts. Clicking the
+  // badge opens the project brief (public/brief.html) in a new tab.
+  createLogoBadge({ href: '/brief.html' });
 
   createAudioControls(audio);
   createViewToggle(getView, toggleView);
