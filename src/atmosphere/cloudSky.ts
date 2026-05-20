@@ -69,23 +69,39 @@ const FS = /* glsl */ `
   uniform float uCloudMix;
   uniform vec2 uWind;
 
-  float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-  float vnoise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    float a = hash(i);
-    float b = hash(i + vec2(1.0, 0.0));
-    float c = hash(i + vec2(0.0, 1.0));
-    float d = hash(i + vec2(1.0, 1.0));
-    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+  // 3D value noise + FBM. Sampling in 3D direction space (not equirectangular
+  // theta/phi UVs) is what kills the visible seams a skybox normally has:
+  //   - the anti-meridian discontinuity where atan(z, x) jumps from +π to -π
+  //   - the pole pinch where all longitudes converge to the +Y/-Y points
+  // 3D noise is C0-continuous over the entire sphere — no seam, no starburst.
+  float hash3(vec3 p) {
+    return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
   }
-  float fbm(vec2 p) {
+  float vnoise3(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    vec3 u = f * f * (3.0 - 2.0 * f);
+    // 8 corners of the unit cube containing p.
+    float c000 = hash3(i + vec3(0.0, 0.0, 0.0));
+    float c100 = hash3(i + vec3(1.0, 0.0, 0.0));
+    float c010 = hash3(i + vec3(0.0, 1.0, 0.0));
+    float c110 = hash3(i + vec3(1.0, 1.0, 0.0));
+    float c001 = hash3(i + vec3(0.0, 0.0, 1.0));
+    float c101 = hash3(i + vec3(1.0, 0.0, 1.0));
+    float c011 = hash3(i + vec3(0.0, 1.0, 1.0));
+    float c111 = hash3(i + vec3(1.0, 1.0, 1.0));
+    return mix(
+      mix(mix(c000, c100, u.x), mix(c010, c110, u.x), u.y),
+      mix(mix(c001, c101, u.x), mix(c011, c111, u.x), u.y),
+      u.z
+    );
+  }
+  float fbm3(vec3 p) {
     float v = 0.0;
     float a = 0.5;
     for (int i = 0; i < 5; i++) {
-      v += a * vnoise(p);
-      p = p * 2.07 + vec2(11.3, 7.9);
+      v += a * vnoise3(p);
+      p = p * 2.07 + vec3(11.3, 7.9, 5.1);
       a *= 0.5;
     }
     return v;
@@ -104,16 +120,16 @@ const FS = /* glsl */ `
       sky = mix(uSkyHorizon, uSkyBottom, smoothstep(0.0, -0.4, dir.y));
     }
 
-    // Cloud field in spherical UVs. Atan handles all four quadrants for
-    // azimuth (theta); polar (phi) is the angle from up. UV scale tuned
-    // so the FBM reads as "puffy mid-altitude clouds" rather than a uniform
-    // soup at typical camera FOVs.
-    float theta = atan(dir.z, dir.x);
-    float phi = acos(clamp(dir.y, -1.0, 1.0));
-    vec2 uv = vec2(theta * 0.36, phi * 0.55);
-    uv += uWind * uTime * uSpeed * 0.018;
-    float c1 = fbm(uv * 3.4);
-    float c2 = fbm(uv * 6.8 + vec2(uTime * uSpeed * 0.011, 0.0));
+    // Cloud field — sample the FBM in 3D using the view direction. Wind
+    // drifts the sample point through 3D space; two layered samples at
+    // different scales add the puffy look. The cloudPos scale tunes the
+    // apparent cloud size — bigger = larger, more separated clumps.
+    vec3 cloudPos = dir * 3.0;
+    // Wind: x → east-west drift, y → north-south drift. Apply on the X/Z
+    // axes so prevailing wind moves clouds across the sky as expected.
+    cloudPos += vec3(uWind.x, 0.0, uWind.y) * uTime * uSpeed * 0.07;
+    float c1 = fbm3(cloudPos);
+    float c2 = fbm3(cloudPos * 2.1 + vec3(uTime * uSpeed * 0.04, 0.0, 0.0));
     float clouds = mix(c1, c2, 0.55);
     clouds = smoothstep(0.4, 0.86, clouds * (0.7 + uDensity));
     // Fade clouds out at + below the horizon so the cloud disc reads as
