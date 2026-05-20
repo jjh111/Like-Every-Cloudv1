@@ -189,6 +189,10 @@ export class CloudSky {
     this.mesh.renderOrder = -1;
     this.mesh.frustumCulled = false;
     this.mesh.userData.raycastIgnore = true;
+    // Sky exists at "infinity" — the wall-cull clipping plane must NEVER
+    // touch this material, otherwise the plane carves a hard seam through
+    // the visible dome whenever the camera looks past the room boundary.
+    this.mesh.userData.no_cull = true;
   }
 
   add(scene: Scene): void {

@@ -63,6 +63,12 @@ export function createWallCull(deps: WallCullDeps): WallCull {
       let cur: Object3D | null = mesh;
       while (cur) {
         if (cur.userData?.hero_id) return;
+        // Opt-out flag. Systems that render outside-the-room geometry (the
+        // sky dome, ambient particles, anything that exists at "infinity")
+        // set `userData.no_cull` so the wall plane never carves them.
+        // Without this, the dome material picks up the clipping plane and
+        // a vertical seam appears where the plane intersects the sphere.
+        if (cur.userData?.no_cull) return;
         cur = cur.parent;
       }
       if (skipPredicate && skipPredicate(mesh)) return;
