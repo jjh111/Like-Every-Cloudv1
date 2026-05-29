@@ -28,6 +28,7 @@ import { createGizmoDock } from './debug/gizmoDock';
 import { createTimeline } from './debug/timeline';
 import { createInspector } from './debug/inspector';
 import { createEventLog } from './debug/eventLog';
+import { createHotkeyHint } from './debug/hotkeyHint';
 import type { Atmosphere } from './atmosphere/atmosphere';
 import { NoAtmosphere } from './atmosphere/atmosphere';
 import { MorningShaft, type MorningShaftConfig, type ShaftDef } from './atmosphere/morningShaft';
@@ -713,6 +714,9 @@ export async function start(container: HTMLElement): Promise<void> {
   // devBus event and surfaces them as fading one-liners. No-op when
   // the bus is quiet.
   createEventLog();
+  // Hotkey cheatsheet — '?' opens a modal listing every shortcut.
+  // Stateless; lives outside director-mode gating.
+  createHotkeyHint();
 
   // ── Gizmo ───────────────────────────────────────────────────────────
   // ONE TransformControls. Mode toggle lives in the dev panel "edit" folder:
