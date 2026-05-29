@@ -342,6 +342,34 @@ export class ClothPatch {
     );
   }
 
+  // ── debug accessors (Phase 2 gizmo wireframe) ────────────────────────
+  //
+  // The cloth's internal Float32Arrays are reused as BufferAttribute backing
+  // for the wireframe gizmo — same memory, marked dirty each tick by the
+  // gizmo so it follows the sim with zero copy. These accessors expose just
+  // enough to build that wireframe without leaking write access.
+
+  /** Particle positions, three floats per particle (x,y,z). Shared by ref. */
+  get positionsBuffer(): Float32Array { return this.positions; }
+  /** 1 = pinned, 0 = free. Used to colour pin markers. */
+  get pinnedFlags(): Uint8Array { return this.pinned; }
+  /** Total particle count (cols × rows). */
+  get particleCount(): number { return this.nParticles; }
+  /** Currently grabbed particle index, or -1 if not grabbed. */
+  get currentGrabIndex(): number { return this.grabIndex; }
+
+  /** Build a flat Uint16 index array suitable for LineSegments — pairs of
+   *  particle indices, one pair per constraint. Allocated once per call;
+   *  consumers should cache. */
+  buildConstraintLineIndices(): Uint16Array {
+    const out = new Uint16Array(this.nConstraints * 2);
+    for (let c = 0; c < this.nConstraints; c++) {
+      out[c * 2 + 0] = this.constraints[c * 3 + 0];
+      out[c * 2 + 1] = this.constraints[c * 3 + 1];
+    }
+    return out;
+  }
+
   // Private ─────────────────────────────────────────────────────────────
 
   private simStep(dt: number): void {

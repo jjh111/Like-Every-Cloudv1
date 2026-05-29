@@ -45,6 +45,10 @@ export interface WallCull {
   update(): void;
   /** Count of materials currently participating. */
   size(): number;
+  /** The active clip plane (read-only reference). Phase-2 gizmo system
+   *  uses this to render a PlaneHelper so the dev can see where the cut
+   *  sits and how `cullSettings.offset` moves it. */
+  readonly clipPlane: Plane;
 }
 
 export function createWallCull(deps: WallCullDeps): WallCull {
@@ -118,5 +122,6 @@ export function createWallCull(deps: WallCullDeps): WallCull {
     attach,
     update,
     size: () => clippedMaterials.size,
+    clipPlane,
   };
 }

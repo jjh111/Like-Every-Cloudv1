@@ -322,6 +322,28 @@ export class AudioManager {
     return out;
   }
 
+  /** World position of a playing entry's panner (or its tracked object), or
+   *  null if (id, channel) is non-spatial / not playing. The Phase-2 audio
+   *  gizmo system calls this per-frame to position the source spheres. */
+  getEntryWorldPosition(id: string, channel: AudioChannel, out: Vector3): boolean {
+    const entry = this.playing.get(keyOf(id, channel));
+    if (!entry || !entry.panner) return false;
+    if (entry.trackedObject) {
+      entry.trackedObject.getWorldPosition(out);
+    } else {
+      // Static-position panner — read it back off the AudioParam.
+      const p = entry.panner;
+      if (p.positionX) {
+        out.set(p.positionX.value, p.positionY.value, p.positionZ.value);
+      } else {
+        // Pre-Audio-Worklet browsers — `position` was a one-shot setter
+        // with no read-back. Return false so the gizmo skips this entry.
+        return false;
+      }
+    }
+    return true;
+  }
+
   /** Set the live gain of a specific playing entry. No-op if (id, channel)
    *  isn't currently playing. Used by the hero audio mixer to drag a
    *  bed's volume without interrupting playback. Smooths to the target

@@ -20,6 +20,11 @@ import { AUDIO_ASSETS } from './audio/manifest';
 import { getHeroId } from './scene/tagging';
 import { createDebugPanel } from './debug/debugPanel';
 import { devBus } from './debug/devBus';
+import { DebugVizScene } from './debug/dvScene';
+import { AudioGizmos } from './debug/audioGizmos';
+import { ClothGizmos } from './debug/clothGizmos';
+import { SceneGizmos } from './debug/sceneGizmos';
+import { createGizmoDock } from './debug/gizmoDock';
 import type { Atmosphere } from './atmosphere/atmosphere';
 import { NoAtmosphere } from './atmosphere/atmosphere';
 import { MorningShaft, type MorningShaftConfig, type ShaftDef } from './atmosphere/morningShaft';
@@ -667,6 +672,37 @@ export async function start(container: HTMLElement): Promise<void> {
   for (const cloth of cloths) clothGrab.register(cloth);
   clothGrab.attach();
 
+  // ── Dev viz layer (Phase 2 gizmos) ───────────────────────────────────
+  // Single root Group with per-category subgroups. Master + per-category
+  // visibility toggles persist in localStorage. The dock widget in the
+  // top-right exposes the same flags to the user. Hotkey: G toggles the
+  // master.
+  //
+  // Gizmo modules are constructed unconditionally — they're cheap when
+  // hidden (a single `.visible = false` short-circuits all per-frame
+  // updates). Director mode hides the dock; the dvScene flag continues
+  // to govern the 3D viz itself.
+  const dvScene = new DebugVizScene();
+  dvScene.add(scene);
+  const audioGizmos = new AudioGizmos(dvScene.groups.audio, audio);
+  const clothGizmos = new ClothGizmos(dvScene.groups.cloth);
+  for (const cloth of cloths) clothGizmos.register(cloth);
+  const sceneGizmos = new SceneGizmos({
+    lightingGroup: dvScene.groups.lighting,
+    cullingGroup: dvScene.groups.culling,
+    camerasGroup: dvScene.groups.cameras,
+    interiorAABB,
+    sunRig,
+    wallCull,
+  });
+  for (const [, obj] of heroLookup) {
+    if (!obj.userData?.hero_id) continue;
+    // interactive defaults to true if the manifest didn't set it explicitly.
+    const interactive = obj.userData.interactive !== false;
+    sceneGizmos.registerHero(obj, interactive);
+  }
+  createGizmoDock({ dv: dvScene });
+
   // ── Gizmo ───────────────────────────────────────────────────────────
   // ONE TransformControls. Mode toggle lives in the dev panel "edit" folder:
   // translate by default, switch to rotate when needed (E key as shortcut).
@@ -1063,6 +1099,12 @@ export async function start(container: HTMLElement): Promise<void> {
     // outside-mesh visibility regardless of state opacity.
     wallCull.update();
     audio.syncSpatial(camera);
+
+    // Dev viz refresh — each gizmo system early-returns if its group is
+    // hidden, so total cost is near-zero when gizmos are off.
+    audioGizmos.update(camera);
+    clothGizmos.update();
+    sceneGizmos.update();
 
     // Boombox glows while music plays. Only the past placement exists
     // today; when a present-state boombox lands, extend this loop.
