@@ -4,7 +4,7 @@ import type { SunRig } from '../atmosphere/sunRig';
 import type { Atmosphere } from '../atmosphere/atmosphere';
 import type { ClothPatch } from '../scene/clothPatch';
 import { devBus } from './devBus';
-import { onDevModeChange } from './devMode';
+import { onDevModeChange, setDevMode } from './devMode';
 
 // Inspector panel — left-edge collapsible dev surface with two tabs in
 // Phase 4 (Heroes + Audio). Atmosphere + Perf tabs land in Phase 8.
@@ -68,10 +68,12 @@ export function createInspector(opts: InspectorOpts): {
   root.id = 'lec-inspector';
   Object.assign(root.style, {
     position: 'fixed',
-    top: '12px',
+    // Starts below the top-left logo badge (which grows on hover) so the
+    // two never collide. Bottom edge stops above the 88px timeline.
+    top: '80px',
     left: '12px',
-    width: '280px',
-    maxHeight: 'calc(100vh - 112px)', // leave room for timeline + margin
+    width: '300px',
+    maxHeight: 'calc(100vh - 176px)', // 80 top + 88 timeline + 8 gap
     zIndex: '35',
     background: PANEL_BG,
     color: TEXT,
@@ -99,10 +101,33 @@ export function createInspector(opts: InspectorOpts): {
   const headerLabel = document.createElement('span');
   headerLabel.textContent = 'inspector';
   headerLabel.style.fontWeight = '600';
+  // Right side of the header: a director-mode toggle + the collapse caret.
+  // The director button is the discoverable way to drop into the clean
+  // viewer view (the D hotkey does the same). stopPropagation keeps a
+  // click on it from also toggling collapse.
+  const headerRight = document.createElement('div');
+  Object.assign(headerRight.style, { display: 'flex', alignItems: 'center', gap: '10px' });
+  const directorBtn = document.createElement('span');
+  directorBtn.textContent = 'director';
+  directorBtn.title = 'hide all dev UI (D)';
+  Object.assign(directorBtn.style, {
+    color: MUTED,
+    fontSize: '9px',
+    letterSpacing: '0.5px',
+    padding: '1px 6px',
+    border: '1px solid rgba(255,255,255,0.12)',
+    borderRadius: '10px',
+    cursor: 'pointer',
+  });
+  directorBtn.addEventListener('mouseenter', () => { directorBtn.style.borderColor = ACCENT; directorBtn.style.color = ACCENT; });
+  directorBtn.addEventListener('mouseleave', () => { directorBtn.style.borderColor = 'rgba(255,255,255,0.12)'; directorBtn.style.color = MUTED; });
+  directorBtn.addEventListener('click', (e) => { e.stopPropagation(); setDevMode(false); });
   const collapseToggle = document.createElement('span');
   collapseToggle.style.color = MUTED;
+  headerRight.appendChild(directorBtn);
+  headerRight.appendChild(collapseToggle);
   header.appendChild(headerLabel);
-  header.appendChild(collapseToggle);
+  header.appendChild(headerRight);
   root.appendChild(header);
 
   // ── tab bar ────────────────────────────────────────────────────────

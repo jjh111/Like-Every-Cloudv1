@@ -679,45 +679,52 @@ export async function start(container: HTMLElement): Promise<void> {
 
   // ── Dev viz layer (Phase 2 gizmos) ───────────────────────────────────
   // Single root Group with per-category subgroups. Master + per-category
-  // visibility toggles persist in localStorage. The dock widget in the
-  // top-right exposes the same flags to the user. Hotkey: G toggles the
-  // master.
+  // visibility toggles persist in localStorage. Hotkey: G toggles the
+  // master. The toggle UI is folded into the inspector (Phase B).
   //
-  // Gizmo modules are constructed unconditionally — they're cheap when
-  // hidden (a single `.visible = false` short-circuits all per-frame
-  // updates). Director mode hides the dock; the dvScene flag continues
-  // to govern the 3D viz itself.
-  const dvScene = new DebugVizScene();
-  dvScene.add(scene);
-  const audioGizmos = new AudioGizmos(dvScene.groups.audio, audio);
-  const clothGizmos = new ClothGizmos(dvScene.groups.cloth);
-  for (const cloth of cloths) clothGizmos.register(cloth);
-  const sceneGizmos = new SceneGizmos({
-    lightingGroup: dvScene.groups.lighting,
-    cullingGroup: dvScene.groups.culling,
-    camerasGroup: dvScene.groups.cameras,
-    interiorAABB,
-    sunRig,
-    wallCull,
-  });
-  for (const [, obj] of heroLookup) {
-    if (!obj.userData?.hero_id) continue;
-    // interactive defaults to true if the manifest didn't set it explicitly.
-    const interactive = obj.userData.interactive !== false;
-    sceneGizmos.registerHero(obj, interactive);
+  // SINGLE DEV GATE: every dev surface — 3D gizmos, timeline, event log,
+  // hotkey hint, inspector, lil-gui — exists only under `?dev`. Demo /
+  // viewer view is therefore truly clean. Director mode (D key) hides
+  // the created surfaces within dev without destroying them. Hoisted to
+  // `let … = null` so the render tick + the later dev-panel block can
+  // reference them; null-guarded at the callsites.
+  let dvScene: DebugVizScene | null = null;
+  let audioGizmos: AudioGizmos | null = null;
+  let clothGizmos: ClothGizmos | null = null;
+  let sceneGizmos: SceneGizmos | null = null;
+  if (devMode) {
+    dvScene = new DebugVizScene();
+    dvScene.add(scene);
+    audioGizmos = new AudioGizmos(dvScene.groups.audio, audio);
+    clothGizmos = new ClothGizmos(dvScene.groups.cloth);
+    for (const cloth of cloths) clothGizmos.register(cloth);
+    sceneGizmos = new SceneGizmos({
+      lightingGroup: dvScene.groups.lighting,
+      cullingGroup: dvScene.groups.culling,
+      camerasGroup: dvScene.groups.cameras,
+      interiorAABB,
+      sunRig,
+      wallCull,
+    });
+    for (const [, obj] of heroLookup) {
+      if (!obj.userData?.hero_id) continue;
+      // interactive defaults to true if the manifest didn't set it explicitly.
+      const interactive = obj.userData.interactive !== false;
+      sceneGizmos.registerHero(obj, interactive);
+    }
+    // Gizmo dock (standalone, top-right) — folded into the inspector in
+    // Phase B; left here for now so Phase A stays a pure gating/layout move.
+    createGizmoDock({ dv: dvScene });
+    // Timeline strip — bottom of viewport, two lanes (time of day + state
+    // morph), transport + hotkeys. Polls clock/state for the playhead each
+    // frame; mutates them on scrub.
+    createTimeline({ clock, state: stateController });
+    // Event log — narrator strip above the timeline. Subscribes to every
+    // devBus event and surfaces them as fading one-liners.
+    createEventLog();
+    // Hotkey cheatsheet — '?' opens a modal listing every shortcut.
+    createHotkeyHint();
   }
-  createGizmoDock({ dv: dvScene });
-  // Timeline strip — bottom of viewport, two lanes (time of day + state
-  // morph), transport + hotkeys. Polls clock/state for the playhead each
-  // frame; mutates them on scrub.
-  createTimeline({ clock, state: stateController });
-  // Event log — narrator strip above the timeline. Subscribes to every
-  // devBus event and surfaces them as fading one-liners. No-op when
-  // the bus is quiet.
-  createEventLog();
-  // Hotkey cheatsheet — '?' opens a modal listing every shortcut.
-  // Stateless; lives outside director-mode gating.
-  createHotkeyHint();
 
   // ── Gizmo ───────────────────────────────────────────────────────────
   // ONE TransformControls. Mode toggle lives in the dev panel "edit" folder:
@@ -1149,10 +1156,11 @@ export async function start(container: HTMLElement): Promise<void> {
     audio.syncSpatial(camera);
 
     // Dev viz refresh — each gizmo system early-returns if its group is
-    // hidden, so total cost is near-zero when gizmos are off.
-    audioGizmos.update(camera);
-    clothGizmos.update();
-    sceneGizmos.update();
+    // hidden, so total cost is near-zero when gizmos are off. Null in the
+    // demo/viewer view (dev surfaces aren't created without ?dev).
+    audioGizmos?.update(camera);
+    clothGizmos?.update();
+    sceneGizmos?.update();
 
     // Boombox glows while music plays. Only the past placement exists
     // today; when a present-state boombox lands, extend this loop.

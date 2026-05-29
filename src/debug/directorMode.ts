@@ -64,17 +64,20 @@ export function initDirectorMode(): { dispose(): void } {
   // Subscribe so the body class stays in sync with subsequent toggles.
   const unsubDev = onDevModeChange((on) => applyBodyClass(on));
 
-  // Pill control. Sits top-left below the logo (which is ~72px tall +
-  // a 12px margin). Click toggles director mode.
+  // Return-to-dev pill. Only shown WHILE in director mode — it's the one
+  // affordance that survives so the director can click back into the dev
+  // HUD (the D hotkey does the same). In dev mode the pill is hidden;
+  // the inspector header's "director" button is the entry point there.
+  // Bottom-left corner so it never collides with the top-left inspector.
   const pill = document.createElement('div');
   pill.id = 'lec-director-pill';
   Object.assign(pill.style, {
     position: 'fixed',
-    top: '88px',
+    bottom: '12px',
     left: '12px',
     zIndex: '50',
     background: 'rgba(18, 22, 28, 0.82)',
-    color: '#e6ebef',
+    color: '#66ffe6',
     font: '10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     padding: '4px 10px',
     borderRadius: '12px',
@@ -84,16 +87,13 @@ export function initDirectorMode(): { dispose(): void } {
     backdropFilter: 'blur(6px)',
     WebkitBackdropFilter: 'blur(6px)',
   });
+  pill.textContent = '◐ exit director (D)';
   function refreshPill(): void {
-    const on = isDevMode();
-    pill.textContent = on ? 'dev (D)' : 'director (D)';
-    pill.style.color = on ? '#66ffe6' : '#9aa3ad';
+    // Visible only in director mode (devMode off).
+    pill.style.display = isDevMode() ? 'none' : 'block';
   }
   refreshPill();
-  pill.addEventListener('click', () => toggleDevMode());
-  // The pill itself is dev-flavoured but we keep it visible in BOTH
-  // modes so the director can return to dev view. Subscribe just to
-  // refresh the label.
+  pill.addEventListener('click', () => setDevMode(true));
   const unsubPill = onDevModeChange(refreshPill);
   document.body.appendChild(pill);
 

@@ -81,6 +81,10 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
   // ID the lil-gui root so the director-mode CSS class can hide it
   // alongside the other legacy dev panels in one selector group.
   gui.domElement.id = 'lec-debug-panel';
+  // Cap height so the panel scrolls internally and never runs under the
+  // 88px timeline strip at the bottom of the viewport.
+  gui.domElement.style.maxHeight = 'calc(100vh - 96px)';
+  gui.domElement.style.overflowY = 'auto';
 
   // Top-level: view toggle is the primary nav action, kept loose at the
   // top rather than buried in a folder. Label flips with deps.getView().
