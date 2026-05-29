@@ -8,6 +8,7 @@ import {
   type Object3D,
 } from 'three';
 import type { PointerInteraction } from '../interaction/pointer';
+import { devBus } from '../debug/devBus';
 
 // Visual feedback for hovered + selected hero objects.
 //
@@ -98,6 +99,7 @@ export class HoverHighlight {
       this.selectSnapshots = [];
       this.removeOutline();
       this.selectedRoot = null;
+      devBus.emit('hero:select', { id: null });
     }
   }
 
@@ -167,6 +169,7 @@ export class HoverHighlight {
     this.handleHoverOut();
     this.hoveredRoot = root;
     this.collectAndBoost(root, this.hoverEmissive, this.hoverSnapshots);
+    devBus.emit('hero:hover', { id: heroIdOf(root) });
   }
 
   private handleHoverOut(): void {
@@ -174,6 +177,7 @@ export class HoverHighlight {
     this.restoreSnapshots(this.hoverSnapshots);
     this.hoverSnapshots = [];
     this.hoveredRoot = null;
+    devBus.emit('hero:hover', { id: null });
   }
 
   private handleClick(obj: Object3D): void {
@@ -199,6 +203,7 @@ export class HoverHighlight {
     this.selectedRoot = root;
     this.collectAndBoost(root, this.selectEmissive, this.selectSnapshots);
     if (!this.skipOutline(root)) this.addOutline(root);
+    devBus.emit('hero:select', { id: heroIdOf(root) });
   }
 
   /** Walk up to the topmost ancestor still carrying `hero_id` userData. The
@@ -267,4 +272,13 @@ export class HoverHighlight {
     this.outlineMesh = null;
     this.outlineParent = null;
   }
+}
+
+/** Pull the hero_id string from a resolved root, or null if missing. The
+ *  outer function is module-scoped (not a class method) so devBus payloads
+ *  inside the class can be built without leaking `this` references into a
+ *  free function. */
+function heroIdOf(root: Object3D): string | null {
+  const id = root.userData?.hero_id;
+  return typeof id === 'string' ? id : null;
 }

@@ -19,6 +19,7 @@ import { AudioManager } from './audio/audioManager';
 import { AUDIO_ASSETS } from './audio/manifest';
 import { getHeroId } from './scene/tagging';
 import { createDebugPanel } from './debug/debugPanel';
+import { devBus } from './debug/devBus';
 import type { Atmosphere } from './atmosphere/atmosphere';
 import { NoAtmosphere } from './atmosphere/atmosphere';
 import { MorningShaft, type MorningShaftConfig, type ShaftDef } from './atmosphere/morningShaft';
@@ -290,6 +291,7 @@ export async function start(container: HTMLElement): Promise<void> {
     // Always land in freeform — bookmarks are user-curated single poses,
     // not loops to ride.
     tweenToPose(toPos, toTarget, 'freeform', destIsInside !== fromIsInside ? doorway : undefined);
+    devBus.emit('bookmark:tween', { name });
   };
 
   // ── Content load ─────────────────────────────────────────────────────
@@ -611,6 +613,7 @@ export async function start(container: HTMLElement): Promise<void> {
     const hangHeight = topY - floorY - 0.02;
 
     const frontCloth = new ClothPatch({
+      id: 'tablecloth_front',
       pinStart: new Vector3(minX + inset, topY, frontPinZ),
       pinEnd:   new Vector3(maxX - inset, topY, frontPinZ),
       height: hangHeight,
@@ -626,6 +629,7 @@ export async function start(container: HTMLElement): Promise<void> {
     cloths.push(frontCloth);
 
     const sideCloth = new ClothPatch({
+      id: 'tablecloth_side',
       pinStart: new Vector3(sidePinX, topY, minZ + inset),
       pinEnd:   new Vector3(sidePinX, topY, maxZ - inset),
       height: hangHeight,
@@ -939,7 +943,10 @@ export async function start(container: HTMLElement): Promise<void> {
       // when bookmarks change so the user sees their new entry immediately.
       bookmarks,
       goToBookmark,
-      saveCurrentAsBookmark: (name: string) => { void saves.saveCurrentAsBookmark(name); },
+      saveCurrentAsBookmark: (name: string) => {
+        void saves.saveCurrentAsBookmark(name);
+        devBus.emit('bookmark:saved', { name });
+      },
       deleteBookmark: (name: string) => { void saves.deleteBookmark(name); },
       clock,
       morningShaft,

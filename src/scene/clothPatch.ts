@@ -7,6 +7,7 @@ import {
   MeshStandardMaterial,
   Vector3,
 } from 'three';
+import { devBus } from '../debug/devBus';
 
 // Low-resolution verlet cloth on the CPU.
 //
@@ -39,6 +40,10 @@ export interface ClothPinConfig {
 }
 
 export interface ClothPatchOptions {
+  /** Short id for dev-bus events (`cloth:grab`, `cloth:release`). Optional —
+   *  defaults to 'cloth'. Set a distinct name per instance (e.g.
+   *  'tablecloth_front') so the event log can name what the user grabbed. */
+  id?: string;
   /** Two world endpoints that define the cloth's TOP edge — pin row 0 runs
    *  evenly between them. Length = cloth width. */
   pinStart: Vector3;
@@ -92,6 +97,9 @@ export class ClothPatch {
   private constraints: Float32Array;
   private nConstraints: number;
 
+  /** Dev-bus event id. Public so consumers can rename after construction. */
+  id: string;
+
   private gravity: number;
   private damping: number;
   private windStrength: number;
@@ -106,6 +114,7 @@ export class ClothPatch {
   private grabWasPinned = false;
 
   constructor(opts: ClothPatchOptions) {
+    this.id = opts.id ?? 'cloth';
     this.cols = Math.max(2, opts.cols ?? 14);
     this.rows = Math.max(2, opts.rows ?? 10);
     this.nParticles = this.cols * this.rows;
@@ -297,6 +306,7 @@ export class ClothPatch {
     this.pinPos[best * 3 + 0] = worldPos.x;
     this.pinPos[best * 3 + 1] = worldPos.y;
     this.pinPos[best * 3 + 2] = worldPos.z;
+    devBus.emit('cloth:grab', { cloth: this.id, particle: best });
     return best;
   }
 
@@ -315,6 +325,7 @@ export class ClothPatch {
     if (this.grabIndex < 0) return;
     if (!this.grabWasPinned) this.pinned[this.grabIndex] = 0;
     this.grabIndex = -1;
+    devBus.emit('cloth:release', { cloth: this.id });
   }
 
   isGrabbing(): boolean {

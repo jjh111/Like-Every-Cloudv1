@@ -1,4 +1,5 @@
 import type { StateContext, StateName } from './types';
+import { devBus } from '../debug/devBus';
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 
@@ -35,11 +36,13 @@ export class StateController {
       this.progress = 0;
     }
     for (const fn of this.targetListeners) fn(target, oldTarget);
+    devBus.emit('state:target', { target });
   }
 
   setProgress(p: number): void {
     this.progress = clamp01(p);
     if (this.progress === 1) this.current = this.target;
+    devBus.emit('state:progress', { progress: this.progress });
   }
 
   tick(deltaSeconds: number): void {

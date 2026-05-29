@@ -20,6 +20,7 @@
 //   every page load starts muted.
 
 import { Vector3, type Camera, type Object3D } from 'three';
+import { devBus } from '../debug/devBus';
 
 export type AudioChannel = 'ambient' | 'music' | 'narration' | 'sfx';
 
@@ -190,9 +191,15 @@ export class AudioManager {
     }
     source.start();
     source.onended = () => {
-      if (this.playing.get(key)?.source === source) this.playing.delete(key);
+      if (this.playing.get(key)?.source === source) {
+        this.playing.delete(key);
+        // Natural end (non-looping track finished) — same event shape as
+        // explicit stopEntry so the dev HUD sees a stop either way.
+        devBus.emit('audio:stop', { id, channel });
+      }
     };
     this.playing.set(key, { id, channel, source, gain, panner, trackedObject });
+    devBus.emit('audio:play', { id, channel });
   }
 
   private createPanner(at: PlayAt): PannerNode {
@@ -276,6 +283,7 @@ export class AudioManager {
       try { entry.source.stop(); } catch { /* already stopped */ }
     }
     this.playing.delete(key);
+    devBus.emit('audio:stop', { id: entry.id, channel: entry.channel });
   }
 
   /** Stop every playing instance with this id, across channels. */

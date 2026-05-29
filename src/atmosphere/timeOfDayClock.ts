@@ -1,4 +1,5 @@
 import { Vector3 } from 'three';
+import { devBus } from '../debug/devBus';
 
 // Continuous scene clock. Pure data — no three.js scene side-effects. SunRig
 // reads it; CloudSky reads it; MorningShaft reads it. The dev panel
@@ -40,10 +41,22 @@ export class TimeOfDayClock {
   }
 
   get t(): number { return this._t; }
-  set t(v: number) { this._t = wrap01(v); }
+  set t(v: number) {
+    const next = wrap01(v);
+    if (next === this._t) return;
+    this._t = next;
+    // Programmatic set (panel scrub, snap buttons). Tick-driven advances
+    // do NOT emit — the bus is for state transitions, not per-frame
+    // updates. Timeline polls clock.t each frame for its playhead.
+    devBus.emit('time:t', { t: next });
+  }
 
   get running(): boolean { return this._running; }
-  set running(v: boolean) { this._running = v; }
+  set running(v: boolean) {
+    if (this._running === v) return;
+    this._running = v;
+    devBus.emit('time:running', { running: v });
+  }
 
   tick(dt: number): void {
     if (!this._running || this.dayLengthSeconds <= 0) return;
