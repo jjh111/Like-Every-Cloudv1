@@ -17,7 +17,7 @@ import { InteractionEngine } from './interaction/engine';
 import { RULES } from './interaction/rules';
 import { AudioManager } from './audio/audioManager';
 import { AUDIO_ASSETS } from './audio/manifest';
-import { getHeroId } from './scene/tagging';
+import { getHeroId, buildHeroDropdownMap } from './scene/tagging';
 import { createDebugPanel } from './debug/debugPanel';
 import { devBus } from './debug/devBus';
 import { DebugVizScene } from './debug/dvScene';
@@ -42,7 +42,6 @@ import { createSaveFlows, applyCameraTunables } from './persist/saveFlows';
 import { createGizmoUndo } from './scene/gizmoUndo';
 import { createAudioControls } from './ui/audioControls';
 import { createTracksBar } from './ui/tracksBar';
-import { createHeroStatePanel, buildHeroDropdownMap } from './ui/heroStatePanel';
 import { createHeroAudioMixer } from './ui/heroAudioMixer';
 import { createLogoBadge } from './ui/logoBadge';
 import { HoverHighlight } from './scene/hoverHighlight';
@@ -1038,16 +1037,17 @@ export async function start(container: HTMLElement): Promise<void> {
       // dvScene is created in the same `if (devMode)` gate above, so it's
       // non-null here. The inspector's gizmo footer drives it.
       dv: dvScene!,
-    });
-
-    createHeroStatePanel(heroLookup, stateController, () => {
-      // Re-cache the transition's mesh list against the new state tags so
-      // visibility flips immediately as the user toggles a radio.
-      active.dispose();
-      active.init(scene);
-      const newMap = buildHeroDropdownMap(heroLookup);
-      debugPanel.refreshHeroDropdown(newMap);
-      inspector.refreshHeroes(newMap);
+      // Fired when the HEROES tab retags a hero (past/present/both) — the
+      // absorbed hero-state-panel behaviour. Re-cache the transition's mesh
+      // list against the new tags so visibility flips immediately, and
+      // refresh the dropdown labels everywhere.
+      onHeroRetag: () => {
+        active.dispose();
+        active.init(scene);
+        const newMap = buildHeroDropdownMap(heroLookup);
+        debugPanel.refreshHeroDropdown(newMap);
+        inspector.refreshHeroes(newMap);
+      },
     });
 
     // Top-left mixer: per-hero ambient bed on/off + per-row volume slider.

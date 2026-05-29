@@ -53,6 +53,9 @@ export interface InspectorOpts {
   setEditTarget: (id: string) => void;
   /** Read the currently edited target so the inspector can highlight it. */
   getEditTarget: () => string;
+  /** Called after a hero's state tag changes (past/present/both) so the
+   *  caller can re-init the transition + refresh dropdown labels. */
+  onHeroRetag?: () => void;
   // Phase 8: atmosphere + perf
   sunRig: SunRig;
   atmospheres: Record<string, Atmosphere>;
@@ -255,18 +258,19 @@ export function createInspector(opts: InspectorOpts): {
   }
 
   // ── render: heroes tab ─────────────────────────────────────────────
+  // Row = name (click → edit/gizmo) · interactive chip · state segment
+  // (past/pres/both). The state segment is the absorbed hero-state panel:
+  // it writes obj.userData.state and fires onHeroRetag so the transition
+  // re-inits + the dropdowns refresh. Group (★) / #all bulk handles have
+  // no state, so they show no segment.
   function renderHeroes(): void {
     content.innerHTML = '';
     const hint = document.createElement('div');
-    hint.textContent = 'click a row to edit (gizmo follows)';
+    hint.textContent = 'name = edit · pa/pr/bo = state tag';
     Object.assign(hint.style, { color: MUTED, fontSize: '9px', marginBottom: '8px' });
     content.appendChild(hint);
 
     const activeTarget = opts.getEditTarget();
-
-    // Group rows by the formatted label so heroes from the dropdown map
-    // appear in the same order as the lil-gui dropdown. The map looks
-    // like { "hero_speaker (past)": "hero_speaker", ... }.
     const rows = Object.entries(heroIdsMap);
     if (rows.length === 0) {
       const empty = document.createElement('div');
@@ -276,48 +280,90 @@ export function createInspector(opts: InspectorOpts): {
       return;
     }
     for (const [label, id] of rows) {
-      // Skip the "(none)" placeholder if it shows up — that's a panel
-      // convenience, not a hero. Real ids never collide with that string.
       if (id === '(none)') continue;
       const obj = opts.heroLookup.get(id);
       const interactive = obj?.userData?.interactive !== false;
-      const row = mkHeroRow({ label, id, interactive, selected: id === activeTarget });
-      row.addEventListener('click', () => {
-        opts.setEditTarget(id);
-        renderTab(); // re-render so the selected-highlight tracks
+      const isBulk = id.startsWith('group:') || id.endsWith('#all');
+      const row = mkHeroRow({
+        // Real heroes show the bare id (the state segment replaces the
+        // "(past)" label suffix); bulk handles keep their decorated label.
+        name: isBulk ? label : id,
+        id, interactive, selected: id === activeTarget,
+        obj: obj ?? null,
+        showState: !isBulk && !!obj,
       });
       content.appendChild(row);
     }
   }
 
-  function mkHeroRow(p: { label: string; id: string; interactive: boolean; selected: boolean }): HTMLDivElement {
+  function mkHeroRow(p: {
+    name: string; id: string; interactive: boolean; selected: boolean;
+    obj: Object3D | null; showState: boolean;
+  }): HTMLDivElement {
     const row = document.createElement('div');
     Object.assign(row.style, {
       display: 'flex',
       alignItems: 'center',
-      justifyContent: 'space-between',
+      gap: '6px',
       padding: '4px 6px',
-      cursor: 'pointer',
       borderRadius: '4px',
       background: p.selected ? SELECTED_BG : 'transparent',
     });
-    row.addEventListener('mouseenter', () => { if (!p.selected) row.style.background = HOVER_BG; });
-    row.addEventListener('mouseleave', () => { if (!p.selected) row.style.background = 'transparent'; });
     const name = document.createElement('span');
-    name.textContent = p.label;
+    name.textContent = p.name;
     name.style.color = p.selected ? ACCENT : TEXT;
     name.style.whiteSpace = 'nowrap';
     name.style.overflow = 'hidden';
     name.style.textOverflow = 'ellipsis';
-    name.style.maxWidth = '210px';
+    name.style.flex = '1 1 auto';
+    name.style.cursor = 'pointer';
+    name.title = 'edit / move (gizmo follows)';
+    name.addEventListener('mouseenter', () => { if (!p.selected) name.style.color = ACCENT; });
+    name.addEventListener('mouseleave', () => { if (!p.selected) name.style.color = TEXT; });
+    name.addEventListener('click', () => { opts.setEditTarget(p.id); renderTab(); });
     const chip = document.createElement('span');
     chip.textContent = p.interactive ? '◆' : '◇';
     chip.style.color = p.interactive ? ACCENT : SET_CHIP;
     chip.style.fontSize = '10px';
+    chip.style.flexShrink = '0';
     chip.title = p.interactive ? 'interactive' : 'set';
     row.appendChild(name);
     row.appendChild(chip);
+    if (p.showState && p.obj) row.appendChild(mkStateSeg(p.obj));
     return row;
+  }
+
+  // Three-segment state tag control (past / present / both). Writes
+  // obj.userData.state and fires onHeroRetag (re-init transition + refresh
+  // dropdowns). Click is stopPropagation'd so it never doubles as a select.
+  function mkStateSeg(obj: Object3D): HTMLDivElement {
+    const wrap = document.createElement('div');
+    Object.assign(wrap.style, { display: 'flex', gap: '2px', flexShrink: '0' });
+    const cur = (obj.userData.state ?? 'past') as string;
+    const defs: Array<[string, string]> = [['past', 'pa'], ['present', 'pr'], ['both', 'bo']];
+    for (const [val, lab] of defs) {
+      const b = document.createElement('span');
+      b.textContent = lab;
+      b.title = val;
+      const active = cur === val;
+      Object.assign(b.style, {
+        fontSize: '9px',
+        padding: '1px 5px',
+        borderRadius: '3px',
+        cursor: 'pointer',
+        color: active ? '#0e1218' : MUTED,
+        background: active ? ACCENT : 'transparent',
+        border: `1px solid ${active ? ACCENT : 'rgba(255,255,255,0.12)'}`,
+      });
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        obj.userData.state = val;
+        opts.onHeroRetag?.();
+        renderTab();
+      });
+      wrap.appendChild(b);
+    }
+    return wrap;
   }
 
   // ── render: audio tab ──────────────────────────────────────────────
