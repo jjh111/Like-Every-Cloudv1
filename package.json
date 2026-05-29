@@ -1,7 +1,7 @@
 {
-  "name": "like-every-cloud",
+  "name": "like-every-cloud-v1",
   "private": true,
-  "version": "0.0.1",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,7 @@
     "compress": "node scripts/compress-glbs.mjs",
     "compress-audio": "node scripts/compress-audio.mjs",
     "make-placeholder-heroes": "node scripts/make-placeholder-heroes.mjs",
-    "deploy": "git push origin main && git push fork main"
+    "deploy": "git push origin main"
   },
   "dependencies": {
     "lil-gui": "^0.20.0",
