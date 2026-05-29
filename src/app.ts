@@ -25,6 +25,7 @@ import { AudioGizmos } from './debug/audioGizmos';
 import { ClothGizmos } from './debug/clothGizmos';
 import { SceneGizmos } from './debug/sceneGizmos';
 import { createGizmoDock } from './debug/gizmoDock';
+import { createTimeline } from './debug/timeline';
 import type { Atmosphere } from './atmosphere/atmosphere';
 import { NoAtmosphere } from './atmosphere/atmosphere';
 import { MorningShaft, type MorningShaftConfig, type ShaftDef } from './atmosphere/morningShaft';
@@ -702,6 +703,10 @@ export async function start(container: HTMLElement): Promise<void> {
     sceneGizmos.registerHero(obj, interactive);
   }
   createGizmoDock({ dv: dvScene });
+  // Timeline strip — bottom of viewport, two lanes (time of day + state
+  // morph), transport + hotkeys. Polls clock/state for the playhead each
+  // frame; mutates them on scrub.
+  createTimeline({ clock, state: stateController });
 
   // ── Gizmo ───────────────────────────────────────────────────────────
   // ONE TransformControls. Mode toggle lives in the dev panel "edit" folder:
