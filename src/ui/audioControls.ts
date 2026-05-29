@@ -8,8 +8,9 @@ import type { AudioManager } from '../audio/audioManager';
 // Co-located with the tracks bar so the entire audio cluster lives at the
 // bottom center of the viewport — `bottom` offset matches the tracks bar's
 // expected height + a small gap, keeping them visually grouped.
-export function createAudioControls(audio: AudioManager): void {
+export function createAudioControls(audio: AudioManager): HTMLDivElement {
   const wrapper = document.createElement('div');
+  wrapper.id = 'lec-audio-controls';
   wrapper.style.cssText = [
     'position: fixed',
     'bottom: 16px',
@@ -79,4 +80,6 @@ export function createAudioControls(audio: AudioManager): void {
       slider.value = cur;
     }
   }, 200);
+
+  return wrapper;
 }

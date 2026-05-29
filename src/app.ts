@@ -20,6 +20,7 @@ import { AUDIO_ASSETS } from './audio/manifest';
 import { getHeroId, buildHeroDropdownMap } from './scene/tagging';
 import { createDebugPanel } from './debug/debugPanel';
 import { devBus } from './debug/devBus';
+import { onDevModeChange } from './debug/devMode';
 import { DebugVizScene } from './debug/dvScene';
 import { AudioGizmos } from './debug/audioGizmos';
 import { ClothGizmos } from './debug/clothGizmos';
@@ -936,12 +937,19 @@ export async function start(container: HTMLElement): Promise<void> {
   // bar listing every audio asset) only show under `?dev=1`.
   const toggleView = (): void => setView(getView() === 'exterior' ? 'interior' : 'exterior');
 
-  // Top-left brand badge — present in both demo and dev views. The hero
-  // audio mixer (dev-only) tucks under this when it mounts. Clicking the
+  // Top-left brand badge — present in both demo and dev views. Clicking the
   // badge opens the project brief (public/brief.html) in a new tab.
   createLogoBadge({ href: '/brief.html' });
 
-  createAudioControls(audio);
+  // Viewer-facing mute pill (bottom-center). In the dev HUD it would sit on
+  // top of the timeline AND duplicate the inspector AUDIO mute, so we hide
+  // it whenever the dev HUD is up — but keep it for the demo/viewer view and
+  // for director mode (the in-dev clean-viewer preview, where the timeline
+  // is hidden).
+  const audioControls = createAudioControls(audio);
+  if (devMode) {
+    onDevModeChange((on) => { audioControls.style.display = on ? 'none' : 'flex'; });
+  }
   createViewToggle(getView, toggleView);
 
   // (Asset audition chips + per-hero ambient beds are now folded into the
