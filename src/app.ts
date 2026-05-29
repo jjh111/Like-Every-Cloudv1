@@ -27,6 +27,7 @@ import { SceneGizmos } from './debug/sceneGizmos';
 import { createGizmoDock } from './debug/gizmoDock';
 import { createTimeline } from './debug/timeline';
 import { createInspector } from './debug/inspector';
+import { createEventLog } from './debug/eventLog';
 import type { Atmosphere } from './atmosphere/atmosphere';
 import { NoAtmosphere } from './atmosphere/atmosphere';
 import { MorningShaft, type MorningShaftConfig, type ShaftDef } from './atmosphere/morningShaft';
@@ -708,6 +709,10 @@ export async function start(container: HTMLElement): Promise<void> {
   // morph), transport + hotkeys. Polls clock/state for the playhead each
   // frame; mutates them on scrub.
   createTimeline({ clock, state: stateController });
+  // Event log — narrator strip above the timeline. Subscribes to every
+  // devBus event and surfaces them as fading one-liners. No-op when
+  // the bus is quiet.
+  createEventLog();
 
   // ── Gizmo ───────────────────────────────────────────────────────────
   // ONE TransformControls. Mode toggle lives in the dev panel "edit" folder:
