@@ -1014,9 +1014,11 @@ export async function start(container: HTMLElement): Promise<void> {
       morningShaft,
     });
 
-    // Inspector — left-edge engine-style HUD with HEROES + AUDIO tabs.
-    // Mirrors the lil-gui edit-hero dropdown and audio folder in a
-    // discoverable, scrollable surface. Refreshes its heroes list
+    // Inspector — left-edge engine-style HUD with HEROES / AUDIO /
+    // ATMOSPHERE / PERF tabs. Mirrors the lil-gui edit-hero dropdown
+    // and audio folder in a discoverable, scrollable surface. Atmosphere
+    // shows live palette swatches + tunables; Perf charts frame time +
+    // renderer.info + subsystem counts. Refreshes its heroes list
     // whenever state tags change (same hook as the lil-gui dropdown).
     const inspector = createInspector({
       audio,
@@ -1024,6 +1026,12 @@ export async function start(container: HTMLElement): Promise<void> {
       heroIds: buildHeroDropdownMap(heroLookup),
       setEditTarget,
       getEditTarget,
+      sunRig,
+      atmospheres,
+      getActiveAtmosphere,
+      setAtmosphere,
+      renderer,
+      cloths,
     });
 
     createHeroStatePanel(heroLookup, stateController, () => {

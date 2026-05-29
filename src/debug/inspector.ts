@@ -1,5 +1,8 @@
-import type { Object3D } from 'three';
+import { type Color, type WebGLRenderer, type Object3D } from 'three';
 import type { AudioChannel, AudioManager } from '../audio/audioManager';
+import type { SunRig } from '../atmosphere/sunRig';
+import type { Atmosphere } from '../atmosphere/atmosphere';
+import type { ClothPatch } from '../scene/clothPatch';
 import { devBus } from './devBus';
 import { onDevModeChange } from './devMode';
 
@@ -38,7 +41,7 @@ const SUBHEAD = '#9aa3ad';
 const LS_COLLAPSED = 'lec_dev_inspector_collapsed';
 const LS_TAB = 'lec_dev_inspector_tab';
 
-type Tab = 'heroes' | 'audio';
+type Tab = 'heroes' | 'audio' | 'atmosphere' | 'perf';
 
 export interface InspectorOpts {
   audio: AudioManager;
@@ -47,6 +50,13 @@ export interface InspectorOpts {
   setEditTarget: (id: string) => void;
   /** Read the currently edited target so the inspector can highlight it. */
   getEditTarget: () => string;
+  // Phase 8: atmosphere + perf
+  sunRig: SunRig;
+  atmospheres: Record<string, Atmosphere>;
+  getActiveAtmosphere: () => Atmosphere;
+  setAtmosphere: (name: string) => void;
+  renderer: WebGLRenderer;
+  cloths: ClothPatch[];
 }
 
 export function createInspector(opts: InspectorOpts): {
@@ -102,7 +112,7 @@ export function createInspector(opts: InspectorOpts): {
     borderBottom: '1px solid rgba(255,255,255,0.06)',
   });
   const tabBtns: Record<Tab, HTMLDivElement> = {} as never;
-  for (const t of ['heroes', 'audio'] as Tab[]) {
+  for (const t of ['heroes', 'audio', 'atmosphere', 'perf'] as Tab[]) {
     const b = document.createElement('div');
     b.textContent = t.toUpperCase();
     Object.assign(b.style, {
@@ -341,8 +351,328 @@ export function createInspector(opts: InspectorOpts): {
   }
 
   function renderTab(): void {
+    stopPerfLoop();
     if (currentTab === 'heroes') renderHeroes();
-    else renderAudio();
+    else if (currentTab === 'audio') renderAudio();
+    else if (currentTab === 'atmosphere') renderAtmosphere();
+    else if (currentTab === 'perf') { renderPerf(); startPerfLoop(); }
+  }
+
+  // ── render: atmosphere tab ─────────────────────────────────────────
+  function renderAtmosphere(): void {
+    content.innerHTML = '';
+
+    // Palette swatches.
+    const paletteHead = mkSubhead('palette');
+    content.appendChild(paletteHead);
+    const palette = opts.sunRig.palette;
+    const swatchRows: Array<[string, Color]> = [
+      ['top', palette.top],
+      ['horizon', palette.horizon],
+      ['bottom', palette.bottom],
+      ['cloud', palette.cloud],
+      ['sun glow', palette.sunGlow],
+      ['sun light', palette.sunLight],
+      ['ambient', palette.ambient],
+    ];
+    for (const [label, color] of swatchRows) {
+      content.appendChild(mkSwatchRow(label, color));
+    }
+
+    // Numeric palette readouts (sun light + ambient intensities).
+    const intensities = document.createElement('div');
+    Object.assign(intensities.style, { display: 'flex', justifyContent: 'space-between', marginTop: '6px', color: MUTED, fontSize: '10px' });
+    intensities.innerHTML =
+      `<span>sun ×${palette.sunIntensity.toFixed(2)}</span>` +
+      `<span>amb ×${palette.ambientIntensity.toFixed(2)}</span>` +
+      `<span>alt ${opts.sunRig.altitude.toFixed(2)}</span>`;
+    content.appendChild(intensities);
+
+    // Preset selector.
+    const presetHead = mkSubhead('preset');
+    presetHead.style.marginTop = '10px';
+    content.appendChild(presetHead);
+    const presetWrap = document.createElement('div');
+    Object.assign(presetWrap.style, { display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '4px' });
+    const activeAtm = opts.getActiveAtmosphere();
+    for (const name of Object.keys(opts.atmospheres)) {
+      const btn = document.createElement('button');
+      btn.textContent = name;
+      const isActive = opts.atmospheres[name] === activeAtm;
+      Object.assign(btn.style, {
+        background: isActive ? 'rgba(102, 255, 230, 0.15)' : 'transparent',
+        color: isActive ? ACCENT : TEXT,
+        border: `1px solid ${isActive ? ACCENT : 'rgba(255,255,255,0.10)'}`,
+        borderRadius: '3px',
+        padding: '2px 6px',
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+        fontSize: '10px',
+      });
+      btn.addEventListener('click', () => {
+        opts.setAtmosphere(name);
+        renderTab();
+      });
+      presetWrap.appendChild(btn);
+    }
+    content.appendChild(presetWrap);
+
+    // Active atmosphere tunables.
+    const t = opts.getActiveAtmosphere().getTunables?.();
+    if (t && t.specs.length) {
+      const tHead = mkSubhead('tunables');
+      tHead.style.marginTop = '10px';
+      content.appendChild(tHead);
+      const tunablesTarget = t.target as Record<string, number>;
+      for (const s of t.specs) {
+        const slider = mkSliderRange(s.label, tunablesTarget[s.key], s.min, s.max, s.step, (v) => {
+          tunablesTarget[s.key] = v;
+        });
+        content.appendChild(slider.row);
+      }
+    }
+  }
+
+  function mkSwatchRow(label: string, color: Color): HTMLDivElement {
+    const row = document.createElement('div');
+    Object.assign(row.style, { display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '3px' });
+    const sw = document.createElement('span');
+    const hex = '#' + color.getHexString();
+    Object.assign(sw.style, {
+      width: '14px', height: '14px',
+      borderRadius: '3px',
+      background: hex,
+      border: '1px solid rgba(255,255,255,0.10)',
+      flexShrink: '0',
+    });
+    const lbl = document.createElement('span');
+    lbl.textContent = label;
+    lbl.style.color = MUTED;
+    lbl.style.fontSize = '10px';
+    lbl.style.width = '70px';
+    const val = document.createElement('span');
+    val.textContent = hex;
+    val.style.color = TEXT;
+    val.style.fontSize = '10px';
+    val.style.marginLeft = 'auto';
+    row.appendChild(sw);
+    row.appendChild(lbl);
+    row.appendChild(val);
+    return row;
+  }
+
+  // ── render: perf tab ───────────────────────────────────────────────
+  // Frame time ring buffer — 120 samples, ~2 seconds at 60 fps.
+  const FRAME_BUF = 120;
+  const frameTimes = new Float32Array(FRAME_BUF);
+  let frameIdx = 0;
+  let frameCount = 0;
+  let lastFrameAt = 0;
+
+  // Refs to the chips we update inside the perf loop. Re-created each
+  // time perf tab renders so they're stable.
+  let perfFpsChip: HTMLSpanElement | null = null;
+  let perfFrameChip: HTMLSpanElement | null = null;
+  let perfCallsChip: HTMLSpanElement | null = null;
+  let perfTrisChip: HTMLSpanElement | null = null;
+  let perfGeosChip: HTMLSpanElement | null = null;
+  let perfTexsChip: HTMLSpanElement | null = null;
+  let perfAudioChip: HTMLSpanElement | null = null;
+  let perfClothChip: HTMLSpanElement | null = null;
+  let perfCanvas: HTMLCanvasElement | null = null;
+  let perfRaf = 0;
+
+  function renderPerf(): void {
+    content.innerHTML = '';
+
+    // Frame time chart.
+    const chartHead = mkSubhead('frame time (last 2s)');
+    content.appendChild(chartHead);
+    perfCanvas = document.createElement('canvas');
+    perfCanvas.width = 260;
+    perfCanvas.height = 48;
+    Object.assign(perfCanvas.style, {
+      width: '100%',
+      height: '48px',
+      borderRadius: '3px',
+      background: 'rgba(255,255,255,0.04)',
+      marginBottom: '8px',
+    });
+    content.appendChild(perfCanvas);
+
+    // Big numbers.
+    const numbers = mkKVRow('fps', '–');
+    perfFpsChip = numbers.val;
+    content.appendChild(numbers.row);
+    const frameRow = mkKVRow('frame ms', '–');
+    perfFrameChip = frameRow.val;
+    content.appendChild(frameRow.row);
+
+    const rendererHead = mkSubhead('renderer');
+    rendererHead.style.marginTop = '8px';
+    content.appendChild(rendererHead);
+    const callsRow = mkKVRow('draw calls', '–');
+    perfCallsChip = callsRow.val;
+    content.appendChild(callsRow.row);
+    const trisRow = mkKVRow('triangles', '–');
+    perfTrisChip = trisRow.val;
+    content.appendChild(trisRow.row);
+    const geosRow = mkKVRow('geometries', '–');
+    perfGeosChip = geosRow.val;
+    content.appendChild(geosRow.row);
+    const texsRow = mkKVRow('textures', '–');
+    perfTexsChip = texsRow.val;
+    content.appendChild(texsRow.row);
+
+    const subsysHead = mkSubhead('subsystems');
+    subsysHead.style.marginTop = '8px';
+    content.appendChild(subsysHead);
+    const audioRow = mkKVRow('audio sources', '–');
+    perfAudioChip = audioRow.val;
+    content.appendChild(audioRow.row);
+    const clothRow = mkKVRow('cloth particles', '–');
+    perfClothChip = clothRow.val;
+    content.appendChild(clothRow.row);
+  }
+
+  function startPerfLoop(): void {
+    if (perfRaf) return;
+    lastFrameAt = performance.now();
+    const tick = (now: number): void => {
+      const dt = now - lastFrameAt;
+      lastFrameAt = now;
+      frameTimes[frameIdx] = dt;
+      frameIdx = (frameIdx + 1) % FRAME_BUF;
+      frameCount = Math.min(FRAME_BUF, frameCount + 1);
+
+      // Mean frame time over the buffer (skip first ~10 frames so the
+      // chart isn't biased by the initial tab-switch hitch).
+      let sum = 0;
+      for (let i = 0; i < frameCount; i++) sum += frameTimes[i];
+      const meanMs = frameCount > 0 ? sum / frameCount : 0;
+      const fps = meanMs > 0 ? Math.round(1000 / meanMs) : 0;
+      if (perfFpsChip) perfFpsChip.textContent = `${fps}`;
+      if (perfFrameChip) perfFrameChip.textContent = `${meanMs.toFixed(1)}`;
+      // Color the FPS chip by budget. Green-ish under 18ms, amber under
+      // 33ms, red above. We use ACCENT cyan as the "good" tone.
+      if (perfFpsChip) perfFpsChip.style.color = meanMs < 18 ? ACCENT : meanMs < 33 ? '#ffd87c' : '#ff7eb6';
+
+      // Renderer stats.
+      const info = opts.renderer.info;
+      if (perfCallsChip) perfCallsChip.textContent = `${info.render.calls}`;
+      if (perfTrisChip) perfTrisChip.textContent = `${info.render.triangles.toLocaleString()}`;
+      if (perfGeosChip) perfGeosChip.textContent = `${info.memory.geometries}`;
+      if (perfTexsChip) perfTexsChip.textContent = `${info.memory.textures}`;
+
+      // Subsystems.
+      if (perfAudioChip) perfAudioChip.textContent = `${opts.audio.listPlaying().length}`;
+      let particles = 0;
+      for (const c of opts.cloths) particles += c.particleCount;
+      if (perfClothChip) perfClothChip.textContent = `${particles}`;
+
+      // Sparkline.
+      drawFramePlot();
+
+      perfRaf = requestAnimationFrame(tick);
+    };
+    perfRaf = requestAnimationFrame(tick);
+  }
+
+  function stopPerfLoop(): void {
+    if (perfRaf) {
+      cancelAnimationFrame(perfRaf);
+      perfRaf = 0;
+    }
+  }
+
+  function drawFramePlot(): void {
+    if (!perfCanvas) return;
+    const ctx = perfCanvas.getContext('2d');
+    if (!ctx) return;
+    const w = perfCanvas.width;
+    const h = perfCanvas.height;
+    ctx.clearRect(0, 0, w, h);
+    // Two threshold lines: 16.6ms (60fps) and 33ms (30fps).
+    const yFor = (ms: number) => h - Math.min(h, Math.max(0, ms / 50 * h));
+    ctx.strokeStyle = 'rgba(102, 255, 230, 0.18)';
+    ctx.beginPath();
+    ctx.moveTo(0, yFor(16.6));
+    ctx.lineTo(w, yFor(16.6));
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255, 216, 124, 0.18)';
+    ctx.beginPath();
+    ctx.moveTo(0, yFor(33));
+    ctx.lineTo(w, yFor(33));
+    ctx.stroke();
+    // Plot the ring buffer left-to-right, oldest first. The newest
+    // sample is at index (frameIdx-1+FRAME_BUF)%FRAME_BUF.
+    ctx.strokeStyle = ACCENT;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let i = 0; i < frameCount; i++) {
+      // Walk from oldest to newest. The oldest is at frameIdx if buffer
+      // is full, or 0 if not yet wrapped.
+      const start = frameCount < FRAME_BUF ? 0 : frameIdx;
+      const j = (start + i) % FRAME_BUF;
+      const x = (i / Math.max(1, frameCount - 1)) * w;
+      const y = yFor(frameTimes[j]);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  function mkKVRow(key: string, valTxt: string): { row: HTMLDivElement; val: HTMLSpanElement } {
+    const row = document.createElement('div');
+    Object.assign(row.style, { display: 'flex', justifyContent: 'space-between', padding: '2px 0', fontSize: '10px' });
+    const k = document.createElement('span');
+    k.textContent = key;
+    k.style.color = MUTED;
+    const v = document.createElement('span');
+    v.textContent = valTxt;
+    v.style.color = TEXT;
+    v.style.fontFamily = 'inherit';
+    row.appendChild(k);
+    row.appendChild(v);
+    return { row, val: v };
+  }
+
+  function mkSliderRange(label: string, initial: number, min: number, max: number, step: number, onChange: (v: number) => void): { row: HTMLDivElement } {
+    const row = document.createElement('div');
+    Object.assign(row.style, { display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '3px' });
+    const lbl = document.createElement('span');
+    lbl.textContent = label;
+    lbl.style.width = '80px';
+    lbl.style.color = MUTED;
+    lbl.style.fontSize = '10px';
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = String(min);
+    slider.max = String(max);
+    slider.step = String(step);
+    slider.value = String(initial);
+    slider.style.flex = '1 1 auto';
+    const val = document.createElement('span');
+    val.textContent = formatNum(initial);
+    val.style.color = MUTED;
+    val.style.fontSize = '9px';
+    val.style.minWidth = '36px';
+    val.style.textAlign = 'right';
+    slider.addEventListener('input', () => {
+      const v = parseFloat(slider.value);
+      onChange(v);
+      val.textContent = formatNum(v);
+    });
+    row.appendChild(lbl);
+    row.appendChild(slider);
+    row.appendChild(val);
+    return { row };
+  }
+
+  function formatNum(v: number): string {
+    if (Math.abs(v) >= 100) return v.toFixed(0);
+    if (Math.abs(v) >= 1) return v.toFixed(2);
+    return v.toFixed(3);
   }
 
   // ── audio event subscriptions ──────────────────────────────────────
@@ -370,6 +700,7 @@ export function createInspector(opts: InspectorOpts): {
       unsubPlay();
       unsubStop();
       unsubDev();
+      stopPerfLoop();
       root.remove();
     },
   };
