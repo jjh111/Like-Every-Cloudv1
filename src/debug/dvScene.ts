@@ -1,4 +1,5 @@
 import { Group, type Scene } from 'three';
+import { isDevMode, onDevModeChange } from './devMode';
 
 // DebugVizScene — the single Three.js Group that owns every dev-only
 // visualization in Phase 2 (audio spheres, cloth wireframes, sun arrow,
@@ -75,6 +76,9 @@ export class DebugVizScene {
       cameras: readBool(LS_KEY_PREFIX + 'cameras', true),
     };
     this.applyVisibility();
+    // Director mode hides the entire viz tree — the stored master flag
+    // is preserved so exiting director restores whatever the user had.
+    onDevModeChange(() => this.applyVisibility());
   }
 
   add(scene: Scene): void { scene.add(this.root); }
@@ -112,7 +116,11 @@ export class DebugVizScene {
   }
 
   private applyVisibility(): void {
-    this.root.visible = this._enabled;
+    // Final visibility = stored master flag AND dev mode on. Director
+    // mode (devMode off) hides the viz subtree without touching the
+    // stored flag so toggling director back restores whatever the user
+    // had.
+    this.root.visible = this._enabled && isDevMode();
     for (const [name, g] of Object.entries(this.groups)) {
       g.visible = this.categoryEnabled[name as GizmoCategory];
     }
