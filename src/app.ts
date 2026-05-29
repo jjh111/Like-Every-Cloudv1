@@ -26,6 +26,7 @@ import { ClothGizmos } from './debug/clothGizmos';
 import { SceneGizmos } from './debug/sceneGizmos';
 import { createGizmoDock } from './debug/gizmoDock';
 import { createTimeline } from './debug/timeline';
+import { createInspector } from './debug/inspector';
 import type { Atmosphere } from './atmosphere/atmosphere';
 import { NoAtmosphere } from './atmosphere/atmosphere';
 import { MorningShaft, type MorningShaftConfig, type ShaftDef } from './atmosphere/morningShaft';
@@ -844,7 +845,9 @@ export async function start(container: HTMLElement): Promise<void> {
     (activeCamera as FreeformMode).init(options);
   };
 
+  let currentEditTarget = '(none)';
   const setEditTarget = (heroId: string): void => {
+    currentEditTarget = heroId;
     if (heroId === '(none)') {
       attachGizmo(null);
       return;
@@ -854,6 +857,7 @@ export async function start(container: HTMLElement): Promise<void> {
     attachGizmo(obj, 'editable');
     switchToFreeformPreservingView(obj);
   };
+  const getEditTarget = (): string => currentEditTarget;
 
   // ── Camera handles ──────────────────────────────────────────────────
   // Two always-visible read-only markers (green = exterior, cyan = doorway)
@@ -993,12 +997,26 @@ export async function start(container: HTMLElement): Promise<void> {
       morningShaft,
     });
 
+    // Inspector — left-edge engine-style HUD with HEROES + AUDIO tabs.
+    // Mirrors the lil-gui edit-hero dropdown and audio folder in a
+    // discoverable, scrollable surface. Refreshes its heroes list
+    // whenever state tags change (same hook as the lil-gui dropdown).
+    const inspector = createInspector({
+      audio,
+      heroLookup,
+      heroIds: buildHeroDropdownMap(heroLookup),
+      setEditTarget,
+      getEditTarget,
+    });
+
     createHeroStatePanel(heroLookup, stateController, () => {
       // Re-cache the transition's mesh list against the new state tags so
       // visibility flips immediately as the user toggles a radio.
       active.dispose();
       active.init(scene);
-      debugPanel.refreshHeroDropdown(buildHeroDropdownMap(heroLookup));
+      const newMap = buildHeroDropdownMap(heroLookup);
+      debugPanel.refreshHeroDropdown(newMap);
+      inspector.refreshHeroes(newMap);
     });
 
     // Top-left mixer: per-hero ambient bed on/off + per-row volume slider.
