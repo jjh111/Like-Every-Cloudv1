@@ -12,6 +12,7 @@ export function createHeroStatePanel(
   onStateToggled: () => void,
 ): void {
   const panel = document.createElement('div');
+  panel.id = 'lec-hero-state-panel';
   panel.style.cssText = [
     'position: fixed',
     'bottom: 16px',

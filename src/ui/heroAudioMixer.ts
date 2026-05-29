@@ -92,6 +92,7 @@ export function createHeroAudioMixer(deps: HeroAudioMixerDeps): void {
 
   // ── DOM scaffolding ────────────────────────────────────────────────────
   const panel = document.createElement('div');
+  panel.id = 'lec-hero-audio-mixer';
   panel.style.cssText = [
     'position: fixed',
     // Sits below the top-left logo badge (created by createLogoBadge). The

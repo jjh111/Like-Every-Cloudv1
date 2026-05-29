@@ -29,6 +29,7 @@ import { createTimeline } from './debug/timeline';
 import { createInspector } from './debug/inspector';
 import { createEventLog } from './debug/eventLog';
 import { createHotkeyHint } from './debug/hotkeyHint';
+import { initDirectorMode } from './debug/directorMode';
 import type { Atmosphere } from './atmosphere/atmosphere';
 import { NoAtmosphere } from './atmosphere/atmosphere';
 import { MorningShaft, type MorningShaftConfig, type ShaftDef } from './atmosphere/morningShaft';
@@ -966,6 +967,13 @@ export async function start(container: HTMLElement): Promise<void> {
   }
 
   if (devMode) {
+    // Director mode plumbing — D hotkey + toggle pill + body-class CSS
+    // that hides the legacy dev surfaces (lil-gui, hero state panel,
+    // tracks bar, hero audio mixer) when director mode is active.
+    // The new dev surfaces (gizmo dock, timeline, inspector, event log)
+    // hide themselves via onDevModeChange subscriptions.
+    initDirectorMode();
+
     const debugPanel = createDebugPanel({
       state: stateController,
       transitions,

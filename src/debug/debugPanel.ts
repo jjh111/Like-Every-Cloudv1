@@ -78,6 +78,9 @@ const BOOKMARK_PLACEHOLDER = '(none)';
 
 export function createDebugPanel(deps: DebugDeps): DebugPanel {
   const gui = new GUI({ title: 'LEC dev panel' });
+  // ID the lil-gui root so the director-mode CSS class can hide it
+  // alongside the other legacy dev panels in one selector group.
+  gui.domElement.id = 'lec-debug-panel';
 
   // Top-level: view toggle is the primary nav action, kept loose at the
   // top rather than buried in a folder. Label flips with deps.getView().

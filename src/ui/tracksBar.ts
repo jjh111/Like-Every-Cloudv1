@@ -7,6 +7,7 @@ import type { AudioAsset } from '../audio/manifest';
 // channel (so a click-to-preview doesn't fight whatever ambient is running).
 export function createTracksBar(audio: AudioManager, assets: AudioAsset[]): void {
   const wrapper = document.createElement('div');
+  wrapper.id = 'lec-tracks-bar';
   wrapper.style.cssText = [
     'position: fixed',
     // Sits above the audio controls pill (bottom: 16px, height ~44px).
