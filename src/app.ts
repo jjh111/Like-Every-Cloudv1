@@ -24,7 +24,6 @@ import { DebugVizScene } from './debug/dvScene';
 import { AudioGizmos } from './debug/audioGizmos';
 import { ClothGizmos } from './debug/clothGizmos';
 import { SceneGizmos } from './debug/sceneGizmos';
-import { createGizmoDock } from './debug/gizmoDock';
 import { createTimeline } from './debug/timeline';
 import { createInspector } from './debug/inspector';
 import { createEventLog } from './debug/eventLog';
@@ -712,9 +711,6 @@ export async function start(container: HTMLElement): Promise<void> {
       const interactive = obj.userData.interactive !== false;
       sceneGizmos.registerHero(obj, interactive);
     }
-    // Gizmo dock (standalone, top-right) — folded into the inspector in
-    // Phase B; left here for now so Phase A stays a pure gating/layout move.
-    createGizmoDock({ dv: dvScene });
     // Timeline strip — bottom of viewport, two lanes (time of day + state
     // morph), transport + hotkeys. Polls clock/state for the playhead each
     // frame; mutates them on scrub.
@@ -1039,6 +1035,9 @@ export async function start(container: HTMLElement): Promise<void> {
       setAtmosphere,
       renderer,
       cloths,
+      // dvScene is created in the same `if (devMode)` gate above, so it's
+      // non-null here. The inspector's gizmo footer drives it.
+      dv: dvScene!,
     });
 
     createHeroStatePanel(heroLookup, stateController, () => {

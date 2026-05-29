@@ -3,8 +3,11 @@ import type { AudioChannel, AudioManager } from '../audio/audioManager';
 import type { SunRig } from '../atmosphere/sunRig';
 import type { Atmosphere } from '../atmosphere/atmosphere';
 import type { ClothPatch } from '../scene/clothPatch';
+import type { DebugVizScene, GizmoCategory } from './dvScene';
 import { devBus } from './devBus';
 import { onDevModeChange, setDevMode } from './devMode';
+
+const GIZMO_CATEGORIES: GizmoCategory[] = ['audio', 'cloth', 'lighting', 'culling', 'cameras'];
 
 // Inspector panel — left-edge collapsible dev surface with two tabs in
 // Phase 4 (Heroes + Audio). Atmosphere + Perf tabs land in Phase 8.
@@ -57,6 +60,8 @@ export interface InspectorOpts {
   setAtmosphere: (name: string) => void;
   renderer: WebGLRenderer;
   cloths: ClothPatch[];
+  /** 3D debug-viz scene — the inspector's gizmo footer drives it. */
+  dv: DebugVizScene;
 }
 
 export function createInspector(opts: InspectorOpts): {
@@ -164,6 +169,56 @@ export function createInspector(opts: InspectorOpts): {
     padding: '8px 10px',
   });
   root.appendChild(content);
+
+  // ── gizmo footer (folded-in from the old standalone dock) ───────────
+  // Always-visible strip at the bottom of the inspector: master toggle +
+  // five 3D-viz category toggles. Drives the DebugVizScene directly; the
+  // G hotkey toggles the master. Replaces the top-right gizmo dock that
+  // collided with lil-gui.
+  const gizmoFooter = document.createElement('div');
+  Object.assign(gizmoFooter.style, {
+    borderTop: '1px solid rgba(255,255,255,0.08)',
+    padding: '6px 10px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexWrap: 'wrap',
+    flexShrink: '0',
+  });
+  const gizmoMaster = document.createElement('span');
+  gizmoMaster.style.cursor = 'pointer';
+  gizmoMaster.style.fontSize = '10px';
+  gizmoMaster.style.fontWeight = '600';
+  gizmoMaster.title = 'toggle all gizmos (G)';
+  gizmoMaster.addEventListener('click', () => opts.dv.toggle());
+  gizmoFooter.appendChild(gizmoMaster);
+  const gizmoCatEls: Partial<Record<GizmoCategory, HTMLSpanElement>> = {};
+  for (const cat of GIZMO_CATEGORIES) {
+    const el = document.createElement('span');
+    el.textContent = cat;
+    Object.assign(el.style, { cursor: 'pointer', fontSize: '9px', letterSpacing: '0.3px' });
+    el.addEventListener('click', () => opts.dv.setCategoryEnabled(cat, !opts.dv.isCategoryEnabled(cat)));
+    gizmoFooter.appendChild(el);
+    gizmoCatEls[cat] = el;
+  }
+  root.appendChild(gizmoFooter);
+  const unsubGizmo = opts.dv.onChange((state) => {
+    gizmoMaster.textContent = (state.enabled ? '● gizmos' : '○ gizmos');
+    gizmoMaster.style.color = state.enabled ? ACCENT : MUTED;
+    for (const cat of GIZMO_CATEGORIES) {
+      const el = gizmoCatEls[cat];
+      if (!el) continue;
+      const on = state.enabled && state.categories[cat];
+      el.style.color = on ? ACCENT : MUTED;
+      el.style.opacity = state.enabled ? '1' : '0.5';
+    }
+  });
+  const onGizmoKey = (e: KeyboardEvent): void => {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'g' || e.key === 'G') { e.preventDefault(); opts.dv.toggle(); }
+  };
+  window.addEventListener('keydown', onGizmoKey);
 
   // ── state ──────────────────────────────────────────────────────────
   let currentTab: Tab = (localStorage.getItem(LS_TAB) as Tab) || 'heroes';
@@ -725,6 +780,8 @@ export function createInspector(opts: InspectorOpts): {
       unsubPlay();
       unsubStop();
       unsubDev();
+      unsubGizmo();
+      window.removeEventListener('keydown', onGizmoKey);
       stopPerfLoop();
       root.remove();
     },
