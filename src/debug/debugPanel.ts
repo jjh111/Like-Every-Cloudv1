@@ -7,6 +7,28 @@ import type { Atmosphere } from '../atmosphere/atmosphere';
 import type { TimeOfDayClock } from '../atmosphere/timeOfDayClock';
 import type { MorningShaft } from '../atmosphere/morningShaft';
 
+// lil-gui = PLUMBING ONLY.
+//
+// After the HUD consolidation, the daily-driver controls live in the new
+// surfaces: the timeline owns time-of-day + morph scrubbing, and the
+// inspector owns hero selection / state tagging / audio / atmosphere /
+// perf / gizmo toggles. lil-gui keeps the precise "write to disk" and
+// fine-numeric authoring that those surfaces deliberately don't expose:
+//
+//   morph        duration · animate-to-other · transition algorithm
+//   time of day  day length · snap-to-time buttons
+//   camera       mode · per-mode tunables · bookmarks · save poses · wall cull
+//   edit         gizmo mode (W/E) · save → manifest.json
+//   atmosphere   shaft endpoint editing · save → morning-shaft.json
+//
+// Removed (now owned elsewhere, no duplicates):
+//   - state target/progress + snap past/present  → timeline MORPH lane
+//   - time-of-day t / clock / auto-cycle         → timeline TIME lane + transport
+//   - audio muted/master/channels                → inspector AUDIO tab
+//   - atmosphere preset + tunables               → inspector ATMOSPHERE tab
+//   - edit-hero dropdown                         → inspector HEROES tab
+//   - "go inside" button                         → the always-present scene button
+
 export interface DebugDeps {
   state: StateController;
   transitions: Record<string, Transition>;
@@ -16,17 +38,18 @@ export interface DebugDeps {
   initialCamera: string;
   setCamera: (name: string) => void;
   getActiveCamera: () => CameraMode;
+  // Atmosphere preset/tunables moved to the inspector; these remain in the
+  // deps for API stability but are no longer surfaced by lil-gui.
   atmospheres: Record<string, Atmosphere>;
   initialAtmosphere: string;
   setAtmosphere: (name: string) => void;
   getActiveAtmosphere: () => Atmosphere;
+  // Audio moved to the inspector AUDIO tab; kept in deps for API stability.
   audio: AudioManager;
-  /** High-level outside/inside toggle. */
+  /** High-level outside/inside toggle (now driven by the scene button). */
   getView: () => 'exterior' | 'interior';
   toggleView: () => void;
-  /** Edit-mode controls — pick a hero, get a single gizmo whose mode (translate
-   *  vs rotate) is governed by setGizmoMode.
-   *  Object-keyed: display label (e.g. "hero_speaker (past)") → bare hero id. */
+  /** Hero selection moved to the inspector HEROES tab; kept for API stability. */
   heroIds: Record<string, string>;
   setEditTarget: (heroId: string) => void;
   /** Read the current gizmo mode for the edit-folder dropdown. */
@@ -40,11 +63,9 @@ export interface DebugDeps {
   setShaftEditTarget: (id: string) => void;
   /** Persist shaft endpoints/radii/tunables back to morning-shaft.json. */
   saveShaftConfig: () => void;
-  /** Snapshot current camera position + target as the exterior pose, persist
-   *  positions.json. Updates the green exterior marker on next sync tick. */
+  /** Snapshot current camera position + target as the exterior pose. */
   saveCameraPose: () => void;
-  /** Snapshot current camera position as the doorway waypoint, persist
-   *  positions.json. Updates the cyan doorway marker on next sync tick. */
+  /** Snapshot current camera position as the doorway waypoint. */
   saveCurrentAsDoorway: () => void;
   /** Live tunables for the wall-cull clipping plane. Panel binds directly. */
   cullSettings: { offset: number; enabled: boolean };
@@ -56,91 +77,62 @@ export interface DebugDeps {
   saveCurrentAsBookmark: (name: string) => void;
   /** Remove a bookmark by name + persist. */
   deleteBookmark: (name: string) => void;
-  /** Time-of-day clock (unified lighting source). Panel exposes a t slider,
-   *  a paused/auto toggle, day-length slider, and snap-to-time buttons. */
+  /** Time-of-day clock — lil-gui exposes day-length + snap buttons only;
+   *  the timeline owns the t scrub + play/pause. */
   clock: TimeOfDayClock;
-  /** Morning shaft — needed for the "snap to shaft reference t" button
-   *  which jumps the clock to the time at which the authored shafts are
-   *  drawn so the gizmo handles align with the cone visuals during edits. */
+  /** Morning shaft — for the "snap to shaft reference t" button. */
   morningShaft: MorningShaft;
 }
 
 type Controller = ReturnType<GUI['add']>;
 
 export type DebugPanel = GUI & {
-  /** Rebuild the edit-hero dropdown options. Called after the hero state
-   *  panel changes a tag — labels include the state suffix, so they go
-   *  stale on retag. */
+  /** No-op since hero selection moved to the inspector HEROES tab. Kept on
+   *  the type so existing callers (app.ts onHeroRetag) stay valid. */
   refreshHeroDropdown(newMap: Record<string, string>): void;
 };
 
 const BOOKMARK_PLACEHOLDER = '(none)';
 
 export function createDebugPanel(deps: DebugDeps): DebugPanel {
-  const gui = new GUI({ title: 'LEC dev panel' });
+  const gui = new GUI({ title: 'LEC · plumbing' });
   // ID the lil-gui root so the director-mode CSS class can hide it
-  // alongside the other legacy dev panels in one selector group.
+  // alongside the other dev panels in one selector group.
   gui.domElement.id = 'lec-debug-panel';
   // Cap height so the panel scrolls internally and never runs under the
   // 88px timeline strip at the bottom of the viewport.
   gui.domElement.style.maxHeight = 'calc(100vh - 96px)';
   gui.domElement.style.overflowY = 'auto';
 
-  // Top-level: view toggle is the primary nav action, kept loose at the
-  // top rather than buried in a folder. Label flips with deps.getView().
-  const viewProxy = { go: () => deps.toggleView() };
-  const viewBtn = gui.add(viewProxy, 'go').name('go inside →');
-
-  // ── state ──────────────────────────────────────────────────────────────
-  const stateFolder = gui.addFolder('state');
-  const stateProxy = {
-    target: deps.state.target,
-    progress: deps.state.progress,
-    duration: deps.state.duration,
+  // ── morph ────────────────────────────────────────────────────────────────
+  // Position-scrub lives in the timeline MORPH lane. Here we keep the
+  // *animation* knobs: how long an auto-morph takes, a one-shot animate
+  // button, and which crossfade algorithm runs.
+  const morphFolder = gui.addFolder('morph');
+  const morphProxy = {
     transition: deps.initialTransition,
-    snapPast: () => {
-      deps.state.duration = 0;
-      deps.state.setTarget('past');
-    },
-    snapPresent: () => {
-      deps.state.duration = 0;
-      deps.state.setTarget('present');
-    },
     animateOther: (() => {
       let next: 'past' | 'present' = 'present';
       return () => {
-        deps.state.duration = stateProxy.duration > 0 ? stateProxy.duration : 1;
+        deps.state.duration = deps.state.duration > 0 ? deps.state.duration : 1;
         deps.state.setTarget(next);
         next = next === 'present' ? 'past' : 'present';
       };
     })(),
   };
-  stateFolder.add(stateProxy, 'target', ['past', 'present'])
-    .onChange((v: 'past' | 'present') => deps.state.setTarget(v))
-    .listen();
-  stateFolder.add(stateProxy, 'progress', 0, 1, 0.001)
-    .onChange((v: number) => deps.state.setProgress(v))
-    .listen();
-  stateFolder.add(stateProxy, 'duration', 0, 5, 0.1)
-    .onChange((v: number) => { deps.state.duration = v; });
-  stateFolder.add(stateProxy, 'snapPast').name('snap → past');
-  stateFolder.add(stateProxy, 'snapPresent').name('snap → present');
-  stateFolder.add(stateProxy, 'animateOther').name('animate to other');
-  stateFolder.add(stateProxy, 'transition', Object.keys(deps.transitions))
+  // Bind duration directly to the live state so .listen() mirrors external
+  // changes (e.g. the timeline sets duration=0 while scrubbing).
+  morphFolder.add(deps.state, 'duration', 0, 5, 0.1).name('duration (s)').listen();
+  morphFolder.add(morphProxy, 'animateOther').name('animate to other');
+  morphFolder.add(morphProxy, 'transition', Object.keys(deps.transitions))
     .onChange((v: string) => deps.setTransition(v));
 
   // ── time of day ────────────────────────────────────────────────────────
-  // Drives the unified SunRig (directional light + ambient + sky palette).
-  // CloudSky + MorningShaft both read the clock through SunRig — moving
-  // this slider re-paints the entire scene's lighting.
-  //
-  // Default is paused so the directors see a stable scene; toggling "running"
-  // advances time by `dayLengthSeconds` real seconds = 24 scene hours.
+  // The t scrub + play/pause live in the timeline. Here: day length + the
+  // snap-to-time buttons (incl. the shaft-reference t used while editing
+  // the morning-shaft cones).
   const timeFolder = gui.addFolder('time of day');
   const timeProxy = {
-    t: deps.clock.t,
-    clock: deps.clock.formatHM(),
-    running: deps.clock.running,
     dayLengthSeconds: deps.clock.dayLengthSeconds,
     dawn: () => { deps.clock.t = 0.25; },
     noon: () => { deps.clock.t = 0.5; },
@@ -148,17 +140,6 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
     midnight: () => { deps.clock.t = 0; },
     shaftRef: () => { deps.clock.t = deps.morningShaft.shaftReferenceT; },
   };
-  // t slider — both directions: panel ↔ clock. The clock might tick on
-  // its own (when running), so we .listen() to mirror back into the slider.
-  timeFolder.add(timeProxy, 't', 0, 1, 0.001)
-    .onChange((v: number) => { deps.clock.t = v; })
-    .listen();
-  // Read-only clock chip (HH:MM). Refreshed below via the controller list.
-  const clockCtrl = timeFolder.add(timeProxy, 'clock').disable().listen();
-  timeFolder.add(timeProxy, 'running')
-    .onChange((v: boolean) => { deps.clock.running = v; })
-    .listen()
-    .name('auto cycle');
   timeFolder.add(timeProxy, 'dayLengthSeconds', 30, 1800, 10)
     .onChange((v: number) => { deps.clock.dayLengthSeconds = v; })
     .name('day length (s)');
@@ -167,15 +148,6 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
   timeFolder.add(timeProxy, 'dusk').name('snap → dusk');
   timeFolder.add(timeProxy, 'midnight').name('snap → midnight');
   timeFolder.add(timeProxy, 'shaftRef').name('snap → shaft reference');
-  // Cheap polling tick so the HH:MM chip + t slider stay in sync when the
-  // clock advances on its own. The lil-gui .listen() handles `t` and
-  // `running`; the formatted `clock` string needs a manual refresh.
-  setInterval(() => {
-    timeProxy.t = deps.clock.t;
-    timeProxy.clock = deps.clock.formatHM();
-    timeProxy.running = deps.clock.running;
-    clockCtrl.updateDisplay();
-  }, 200);
 
   // ── camera ─────────────────────────────────────────────────────────────
   const cameraFolder = gui.addFolder('camera');
@@ -190,13 +162,7 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
       const trimmed = name.trim();
       if (!trimmed) return;
       deps.saveCurrentAsBookmark(trimmed);
-      // After save: re-build the dropdown so the new entry is selectable.
-      // Use a tiny delay so the save flow's await resolves first; the
-      // bookmarks map is mutated synchronously before the network call,
-      // so 0ms (microtask) is enough.
-      setTimeout(() => {
-        refreshBookmarks(trimmed);
-      }, 0);
+      setTimeout(() => { refreshBookmarks(trimmed); }, 0);
     },
     deleteBookmark: () => {
       const name = cameraProxy.bookmark;
@@ -214,8 +180,6 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
       refreshCameraTunables();
     })
     .listen();
-  // Per-mode tunables get their own sub-folder so they sit visually next
-  // to the camera-mode dropdown regardless of when they're added/removed.
   const cameraTunablesFolder = cameraFolder.addFolder('tunables (active mode)');
   let cameraTunableControllers: Controller[] = [];
   function refreshCameraTunables() {
@@ -232,9 +196,6 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
   }
   refreshCameraTunables();
 
-  // Bookmarks: tween-to-pose dropdown. Picking a bookmark immediately fires
-  // goToBookmark, then the proxy resets to "(none)" so picking the same
-  // bookmark again re-fires onChange (lil-gui skips same-value changes).
   let bookmarkCtrl: Controller = buildBookmarkController();
   function buildBookmarkController(): Controller {
     return cameraFolder.add(cameraProxy, 'bookmark', bookmarkOptions())
@@ -242,8 +203,6 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
       .onChange((v: string) => {
         if (v === BOOKMARK_PLACEHOLDER) return;
         deps.goToBookmark(v);
-        // Defer the reset to after the current change handler so lil-gui
-        // doesn't see a recursive setValue mid-event.
         setTimeout(() => {
           cameraProxy.bookmark = BOOKMARK_PLACEHOLDER;
           bookmarkCtrl.updateDisplay();
@@ -267,167 +226,51 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
 
   // Wall-cull controls. `offset` pushes the clip plane deeper into the room
   // (positive = less wall cut, plane sits further from the camera).
-  cameraFolder.add(deps.cullSettings, 'enabled')
-    .name('wall cull on')
-    .listen();
-  cameraFolder.add(deps.cullSettings, 'offset', -1, 3, 0.05)
-    .name('cull offset (m)')
-    .listen();
+  cameraFolder.add(deps.cullSettings, 'enabled').name('wall cull on').listen();
+  cameraFolder.add(deps.cullSettings, 'offset', -1, 3, 0.05).name('cull offset (m)').listen();
 
-  // The two anchor points. Each button snapshots the LIVE camera into the
-  // corresponding persisted slot and rewrites positions.json. The colored
-  // markers in the scene (green = exterior, cyan = doorway) follow on the
-  // next sync tick so you always see where the saved values live.
-  //
-  //   set outside view here  → camera.position + camera.lookAt → exterior pose
-  //   set doorway here       → camera.position → doorway waypoint
   cameraFolder.add(cameraProxy, 'saveExterior').name('set outside view here');
   cameraFolder.add(cameraProxy, 'saveDoorway').name('set doorway here');
 
   // ── edit ───────────────────────────────────────────────────────────────
+  // Hero SELECTION moved to the inspector HEROES tab. lil-gui keeps the
+  // gizmo-mode toggle (the discoverable surface for the W/E keys) + the
+  // save-to-manifest button (the disk write).
   const editFolder = gui.addFolder('edit');
   const editProxy = {
-    target: '(none)',
-    gizmoMode: 'translate' as 'translate' | 'rotate',
+    gizmoMode: deps.getGizmoMode(),
     save: () => deps.saveHeroPositions(),
   };
-  // editTargetCtrl is reassigned by refreshHeroDropdown when state tags
-  // change — destroying and re-adding is the only lil-gui pattern for
-  // updating option lists.
-  let editTargetCtrl = editFolder.add(editProxy, 'target', deps.heroIds)
-    .name('edit hero')
-    .onChange(onEditTargetChanged);
-  function onEditTargetChanged(v: string): void {
-    // Picking a hero clears the shaft selection — one gizmo target at a time.
-    // The camera-handle markers are passive visualizations now, so there's
-    // nothing to clear there.
-    if (v !== '(none)') {
-      if (atmosProxy.shaftHandle !== '(none)') {
-        atmosProxy.shaftHandle = '(none)';
-        shaftHandleCtrl.updateDisplay();
-        deps.setShaftEditTarget('(none)');
-      }
-    }
-    deps.setEditTarget(v);
-    // attachGizmo resets mode to translate on every pick — keep the dropdown
-    // in sync so it doesn't lie about the current state.
-    editProxy.gizmoMode = 'translate';
-    gizmoModeCtrl.updateDisplay();
-  }
-  // Single gizmo with mode toggle. Default translate; user picks rotate when
-  // they want to spin a hero. The W / E keyboard shortcuts (in app.ts) do
-  // the same thing — this dropdown is the discoverable surface.
   const gizmoModeCtrl = editFolder.add(editProxy, 'gizmoMode', ['translate', 'rotate'])
     .name('gizmo (W/E)')
     .onChange((v: 'translate' | 'rotate') => deps.setGizmoMode(v));
   editFolder.add(editProxy, 'save').name('save → manifest.json');
 
   // ── atmosphere ─────────────────────────────────────────────────────────
+  // Preset + tunables moved to the inspector ATMOSPHERE tab. lil-gui keeps
+  // the shaft endpoint editing (gizmo-driven) + the disk write.
   const atmosFolder = gui.addFolder('atmosphere');
   const atmosProxy = {
-    atmosphere: deps.initialAtmosphere,
     shaftHandle: '(none)',
     saveShafts: () => deps.saveShaftConfig(),
   };
-  atmosFolder.add(atmosProxy, 'atmosphere', Object.keys(deps.atmospheres))
-    .name('preset')
-    .onChange((v: string) => {
-      // Reset shaft edit when atmosphere changes — new atmosphere may not
-      // have shaft handles at all.
-      atmosProxy.shaftHandle = '(none)';
-      shaftHandleCtrl.updateDisplay();
-      deps.setShaftEditTarget('(none)');
-      deps.setAtmosphere(v);
-      refreshAtmosphereTunables();
-    });
-  let atmosphereTunableControllers: Controller[] = [];
-  function refreshAtmosphereTunables() {
-    for (const c of atmosphereTunableControllers) c.destroy();
-    atmosphereTunableControllers = [];
-    const t = deps.getActiveAtmosphere().getTunables?.();
-    if (!t) return;
-    for (const s of t.specs) {
-      const c = atmosFolder
-        .add(t.target as Record<string, number>, s.key, s.min, s.max, s.step)
-        .name(s.label)
-        .listen();
-      atmosphereTunableControllers.push(c);
-    }
-  }
-  refreshAtmosphereTunables();
-  // Shaft endpoint editing — pick a handle, the existing TransformControls
-  // gizmo attaches to it. The yellow sphere is the door/window origin; the
-  // blue sphere is where the shaft splashes on the floor.
-  const shaftHandleCtrl = atmosFolder.add(atmosProxy, 'shaftHandle', deps.shaftHandleIds)
+  atmosFolder.add(atmosProxy, 'shaftHandle', deps.shaftHandleIds)
     .name('edit shaft')
-    .onChange((v: string) => {
-      // Picking a shaft handle clears the hero selection — one gizmo at a time.
-      if (v !== '(none)') {
-        if (editProxy.target !== '(none)') {
-          editProxy.target = '(none)';
-          editTargetCtrl.updateDisplay();
-          deps.setEditTarget('(none)');
-        }
-      }
-      deps.setShaftEditTarget(v);
-    });
+    .onChange((v: string) => deps.setShaftEditTarget(v));
   atmosFolder.add(atmosProxy, 'saveShafts').name('save → morning-shaft.json');
 
-  // ── audio ──────────────────────────────────────────────────────────────
-  const audioFolder = gui.addFolder('audio');
-  const audioProxy = {
-    muted: deps.audio.muted,
-    master: deps.audio.getMasterVolume(),
-    ambient: deps.audio.getChannelVolume('ambient'),
-    music: deps.audio.getChannelVolume('music'),
-    narration: deps.audio.getChannelVolume('narration'),
-    sfx: deps.audio.getChannelVolume('sfx'),
-  };
-  audioFolder.add(audioProxy, 'muted')
-    .name('muted')
-    .onChange((v: boolean) => deps.audio.setMuted(v))
-    .listen();
-  audioFolder.add(audioProxy, 'master', 0, 1, 0.01)
-    .name('master vol')
-    .onChange((v: number) => deps.audio.setMasterVolume(v));
-  audioFolder.add(audioProxy, 'ambient', 0, 1, 0.01)
-    .name('ambient vol')
-    .onChange((v: number) => deps.audio.setChannelVolume('ambient', v));
-  audioFolder.add(audioProxy, 'music', 0, 1, 0.01)
-    .name('music vol')
-    .onChange((v: number) => deps.audio.setChannelVolume('music', v));
-  audioFolder.add(audioProxy, 'narration', 0, 1, 0.01)
-    .name('narration vol')
-    .onChange((v: number) => deps.audio.setChannelVolume('narration', v));
-  audioFolder.add(audioProxy, 'sfx', 0, 1, 0.01)
-    .name('sfx vol')
-    .onChange((v: number) => deps.audio.setChannelVolume('sfx', v));
-
-  // Detect external changes (view toggle, programmatic camera swap, W/E/R
-  // shortcuts, mute via the bottom-left pill) so the panel mirrors state
-  // instead of being stale.
+  // Sync poll: camera-mode swaps + W/E gizmo-mode changes happen outside the
+  // panel, so mirror them into the displayed controls.
   let lastActiveCam = deps.getActiveCamera();
   setInterval(() => {
-    stateProxy.target = deps.state.target;
-    stateProxy.progress = deps.state.progress;
-    stateProxy.duration = deps.state.duration;
-    audioProxy.muted = deps.audio.muted;
-    viewBtn.name(deps.getView() === 'exterior' ? 'go inside →' : '← go outside');
-
     const activeCam = deps.getActiveCamera();
     if (activeCam !== lastActiveCam) {
       lastActiveCam = activeCam;
       for (const [k, v] of Object.entries(deps.cameras)) {
-        if (v === activeCam) {
-          cameraProxy.camera = k;
-          break;
-        }
+        if (v === activeCam) { cameraProxy.camera = k; break; }
       }
       refreshCameraTunables();
     }
-
-    // W/E shortcuts mutate gizmo mode in app.ts without going through the
-    // dropdown — pull the displayed value into sync each tick.
     const mode = deps.getGizmoMode();
     if (editProxy.gizmoMode !== mode) {
       editProxy.gizmoMode = mode;
@@ -435,22 +278,9 @@ export function createDebugPanel(deps: DebugDeps): DebugPanel {
     }
   }, 100);
 
-  // Public surface beyond the GUI itself: a way to update the edit-hero
-  // dropdown options when the hero state panel retags something. lil-gui
-  // doesn't reconfigure option lists in place, so we destroy + recreate.
-  const refreshHeroDropdown = (newMap: Record<string, string>): void => {
-    const previousValue = editProxy.target;
-    editTargetCtrl.destroy();
-    editTargetCtrl = editFolder.add(editProxy, 'target', newMap)
-      .name('edit hero')
-      .onChange(onEditTargetChanged);
-    // Preserve the user's current selection across the rebuild, but only
-    // if it still appears in the new option list (state retag never
-    // changes the underlying ids, so this is essentially always safe).
-    if (Object.values(newMap).includes(previousValue)) {
-      editTargetCtrl.setValue(previousValue);
-    }
-  };
+  // Hero-dropdown refresh is now the inspector's job; keep a no-op so the
+  // existing caller (app.ts onHeroRetag) stays valid without branching.
+  const refreshHeroDropdown = (_newMap: Record<string, string>): void => { /* no-op */ };
 
   return Object.assign(gui, { refreshHeroDropdown });
 }
