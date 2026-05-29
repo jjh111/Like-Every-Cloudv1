@@ -41,8 +41,6 @@ import { createCameraHandles } from './scene/cameraHandles';
 import { createSaveFlows, applyCameraTunables } from './persist/saveFlows';
 import { createGizmoUndo } from './scene/gizmoUndo';
 import { createAudioControls } from './ui/audioControls';
-import { createTracksBar } from './ui/tracksBar';
-import { createHeroAudioMixer } from './ui/heroAudioMixer';
 import { createLogoBadge } from './ui/logoBadge';
 import { HoverHighlight } from './scene/hoverHighlight';
 import { ClothPatch } from './scene/clothPatch';
@@ -946,10 +944,8 @@ export async function start(container: HTMLElement): Promise<void> {
   createAudioControls(audio);
   createViewToggle(getView, toggleView);
 
-  // Tracks bar lists every preloaded audio asset as audition chips + shows
-  // per-channel "now playing" status. Useful for authoring, noisy for
-  // viewers — gated to dev mode.
-  if (devMode) createTracksBar(audio, AUDIO_ASSETS);
+  // (Asset audition chips + per-hero ambient beds are now folded into the
+  //  inspector AUDIO tab — see createInspector below.)
 
   // Small ⚙ button top-right in demo view → opens dev view via ?dev=1.
   // Not shown in dev view because lil-gui already lives top-right there.
@@ -1037,6 +1033,13 @@ export async function start(container: HTMLElement): Promise<void> {
       // dvScene is created in the same `if (devMode)` gate above, so it's
       // non-null here. The inspector's gizmo footer drives it.
       dv: dvScene!,
+      // AUDIO tab authoring (absorbed hero-audio-mixer + tracks-bar):
+      // per-hero ambient beds bound to the live AudioManager + stateConfig,
+      // plus the full asset catalogue for the audition chip grid.
+      state: stateController,
+      stateConfig,
+      saveStatesConfig: (cfg) => saves.saveStatesConfig(cfg),
+      audioAssets: AUDIO_ASSETS,
       // Fired when the HEROES tab retags a hero (past/present/both) — the
       // absorbed hero-state-panel behaviour. Re-cache the transition's mesh
       // list against the new tags so visibility flips immediately, and
@@ -1048,18 +1051,6 @@ export async function start(container: HTMLElement): Promise<void> {
         debugPanel.refreshHeroDropdown(newMap);
         inspector.refreshHeroes(newMap);
       },
-    });
-
-    // Top-left mixer: per-hero ambient bed on/off + per-row volume slider.
-    // Bound to the AudioManager so toggles + slider drags reflect live, and
-    // to the loaded stateConfig so "save mix" persists what you hear back
-    // into public/states.json.
-    createHeroAudioMixer({
-      audio,
-      state: stateController,
-      heroLookup,
-      initialConfig: stateConfig,
-      saveStatesConfig: (cfg) => saves.saveStatesConfig(cfg),
     });
 
     // Hover label: small floating chip showing the hero_id of whatever's

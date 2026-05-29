@@ -3,6 +3,10 @@ import type { AudioChannel, AudioManager } from '../audio/audioManager';
 import type { SunRig } from '../atmosphere/sunRig';
 import type { Atmosphere } from '../atmosphere/atmosphere';
 import type { ClothPatch } from '../scene/clothPatch';
+import type { StateController } from '../state/stateController';
+import type { StateConfig, HeroAudioBed } from '../state/stateConfig';
+import type { StateName } from '../state/types';
+import type { AudioAsset } from '../audio/manifest';
 import type { DebugVizScene, GizmoCategory } from './dvScene';
 import { devBus } from './devBus';
 import { onDevModeChange, setDevMode } from './devMode';
@@ -65,6 +69,15 @@ export interface InspectorOpts {
   cloths: ClothPatch[];
   /** 3D debug-viz scene — the inspector's gizmo footer drives it. */
   dv: DebugVizScene;
+  // ── audio authoring (absorbed from the hero-audio-mixer + tracks-bar) ──
+  /** Current morph state — hero beds operate on `state.current`. */
+  state: StateController;
+  /** Authored per-state hero ambient beds. The AUDIO tab edits a copy. */
+  stateConfig: StateConfig;
+  /** Persist both states' beds to public/states.json. */
+  saveStatesConfig: (config: StateConfig) => Promise<void>;
+  /** Full audio catalogue for the quick-play (audition) chip grid. */
+  audioAssets: AudioAsset[];
 }
 
 export function createInspector(opts: InspectorOpts): {
@@ -397,6 +410,190 @@ export function createInspector(opts: InspectorOpts): {
     playing.style.marginTop = '10px';
     content.appendChild(playing);
     renderPlayingList();
+
+    // Hero beds + asset audition (absorbed panels).
+    renderBeds();
+    renderAssets();
+  }
+
+  // ── hero ambient beds (absorbed from hero-audio-mixer) ──────────────
+  // Working copy of the authored beds — never mutate the caller's config.
+  // "save mix" flushes this to states.json.
+  const bedConfig: StateConfig = {
+    past: { ...opts.stateConfig.past, heroAudio: { ...(opts.stateConfig.past.heroAudio ?? {}) } },
+    present: { ...opts.stateConfig.present, heroAudio: { ...(opts.stateConfig.present.heroAudio ?? {}) } },
+  };
+  const bedHeroIds = Array.from(new Set([
+    ...Object.keys(bedConfig.past.heroAudio ?? {}),
+    ...Object.keys(bedConfig.present.heroAudio ?? {}),
+  ])).sort();
+  interface BedRow { toggle: HTMLSpanElement; slider: HTMLInputElement; caption: HTMLSpanElement; }
+  const bedRows = new Map<string, BedRow>();
+  let bedStateBadge: HTMLSpanElement | null = null;
+
+  const bedFor = (heroId: string, st: StateName): HeroAudioBed | undefined => bedConfig[st].heroAudio?.[heroId];
+  const channelOf = (bed: HeroAudioBed): AudioChannel => bed.channel ?? 'ambient';
+  const templateBed = (heroId: string, st: StateName): HeroAudioBed => {
+    const a = bedConfig[st].heroAudio?.[heroId];
+    if (a) return { ...a };
+    const other: StateName = st === 'past' ? 'present' : 'past';
+    const b = bedConfig[other].heroAudio?.[heroId];
+    if (b) return { ...b };
+    return { id: '', volume: 0.4 };
+  };
+  const startBed = (heroId: string): void => {
+    const st = opts.state.current;
+    let bed = bedFor(heroId, st);
+    if (!bed) {
+      const t = templateBed(heroId, st);
+      if (!t.id) { console.warn('[inspector] no template bed for', heroId); return; }
+      bed = t;
+      (bedConfig[st].heroAudio ??= {})[heroId] = bed;
+    }
+    const obj = opts.heroLookup.get(heroId);
+    opts.audio.play(bed.id, {
+      channel: channelOf(bed), loop: bed.loop ?? true, volume: bed.volume ?? 0.4,
+      fadeIn: 0.4, at: obj ? { object: obj } : undefined,
+    });
+  };
+  const stopBed = (heroId: string): void => {
+    const st = opts.state.current;
+    const bed = bedFor(heroId, st);
+    if (bed) { opts.audio.stop(bed.id, 0.4); delete bedConfig[st].heroAudio?.[heroId]; }
+    else {
+      const other = bedFor(heroId, st === 'past' ? 'present' : 'past');
+      if (other) opts.audio.stop(other.id, 0.4);
+    }
+  };
+
+  function renderBeds(): void {
+    bedRows.clear();
+    bedStateBadge = null;
+    const head = mkSubhead('hero beds');
+    head.style.marginTop = '10px';
+    const badge = document.createElement('span');
+    badge.textContent = opts.state.current;
+    Object.assign(badge.style, { color: ACCENT, fontSize: '9px', marginLeft: '6px' });
+    head.appendChild(badge);
+    bedStateBadge = badge;
+    content.appendChild(head);
+    if (bedHeroIds.length === 0) {
+      const empty = document.createElement('div');
+      empty.textContent = '(no heroAudio in states.json)';
+      empty.style.color = MUTED; empty.style.fontSize = '10px';
+      content.appendChild(empty);
+      return;
+    }
+    for (const heroId of bedHeroIds) {
+      const row = document.createElement('div');
+      Object.assign(row.style, { display: 'flex', alignItems: 'center', gap: '6px', padding: '3px 0' });
+      const toggle = document.createElement('span');
+      Object.assign(toggle.style, { cursor: 'pointer', fontSize: '12px', width: '14px', flexShrink: '0', color: MUTED });
+      toggle.textContent = '○';
+      toggle.addEventListener('click', async () => {
+        try { await opts.audio.resume(); } catch { /* ignored */ }
+        const bed = bedFor(heroId, opts.state.current);
+        const ch = bed ? channelOf(bed) : 'ambient';
+        if (bed && opts.audio.isEntryPlaying(bed.id, ch)) stopBed(heroId); else startBed(heroId);
+        refreshBeds();
+      });
+      const labelBlock = document.createElement('div');
+      Object.assign(labelBlock.style, { flex: '1 1 auto', minWidth: '0' });
+      const nm = document.createElement('div');
+      nm.textContent = heroId;
+      Object.assign(nm.style, { fontSize: '10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' });
+      const caption = document.createElement('span');
+      Object.assign(caption.style, { fontSize: '8.5px', color: MUTED, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' });
+      labelBlock.appendChild(nm); labelBlock.appendChild(caption);
+      const slider = document.createElement('input');
+      slider.type = 'range'; slider.min = '0'; slider.max = '1'; slider.step = '0.01'; slider.value = '0';
+      Object.assign(slider.style, { width: '72px', flexShrink: '0' });
+      slider.addEventListener('input', () => {
+        const bed = bedFor(heroId, opts.state.current);
+        if (!bed) return;
+        bed.volume = Number(slider.value);
+        opts.audio.setEntryVolume(bed.id, channelOf(bed), bed.volume);
+      });
+      row.appendChild(toggle); row.appendChild(labelBlock); row.appendChild(slider);
+      content.appendChild(row);
+      bedRows.set(heroId, { toggle, slider, caption });
+    }
+    // save mix
+    const saveRow = document.createElement('div');
+    Object.assign(saveRow.style, { display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' });
+    const saveBtn = document.createElement('button');
+    saveBtn.textContent = 'save mix';
+    Object.assign(saveBtn.style, {
+      flex: '1', padding: '4px 8px', background: 'rgba(255,255,255,0.06)', color: TEXT,
+      border: '1px solid rgba(255,255,255,0.18)', borderRadius: '4px', cursor: 'pointer',
+      font: 'inherit', fontSize: '10px',
+    });
+    const saveStatus = document.createElement('span');
+    Object.assign(saveStatus.style, { fontSize: '9px', color: MUTED, minWidth: '48px', textAlign: 'right' });
+    saveBtn.addEventListener('click', async () => {
+      saveBtn.disabled = true; saveStatus.textContent = 'saving…';
+      try { await opts.saveStatesConfig(bedConfig); saveStatus.textContent = 'saved ✓'; setTimeout(() => { saveStatus.textContent = ''; }, 1500); }
+      catch { saveStatus.textContent = 'failed'; }
+      finally { saveBtn.disabled = false; }
+    });
+    saveRow.appendChild(saveBtn); saveRow.appendChild(saveStatus);
+    content.appendChild(saveRow);
+    refreshBeds();
+  }
+
+  function refreshBeds(): void {
+    if (bedStateBadge) bedStateBadge.textContent = opts.state.current;
+    const st = opts.state.current;
+    for (const [heroId, refs] of bedRows) {
+      const bed = bedFor(heroId, st);
+      const ch: AudioChannel = bed ? channelOf(bed) : 'ambient';
+      const playing = bed ? opts.audio.isEntryPlaying(bed.id, ch) : false;
+      refs.toggle.textContent = playing ? '●' : '○';
+      refs.toggle.style.color = playing ? ACCENT : MUTED;
+      if (bed) refs.caption.textContent = `${bed.id} · ${ch}`;
+      else { const t = templateBed(heroId, st); refs.caption.textContent = t.id ? `off · would play ${t.id}` : '(no template)'; }
+      refs.slider.disabled = !bed;
+      if (document.activeElement !== refs.slider) {
+        const live = bed ? opts.audio.getEntryVolume(bed.id, ch) : undefined;
+        refs.slider.value = String(live ?? bed?.volume ?? 0);
+      }
+    }
+  }
+
+  // ── asset audition grid (absorbed from tracks-bar) ──────────────────
+  const assetChips = new Map<string, HTMLSpanElement>();
+  function renderAssets(): void {
+    assetChips.clear();
+    const head = mkSubhead('audition assets');
+    head.style.marginTop = '10px';
+    content.appendChild(head);
+    const grid = document.createElement('div');
+    Object.assign(grid.style, { display: 'flex', flexWrap: 'wrap', gap: '4px' });
+    for (const a of opts.audioAssets) {
+      const chip = document.createElement('span');
+      chip.textContent = a.id;
+      chip.title = `audition ${a.id} on sfx`;
+      Object.assign(chip.style, {
+        fontSize: '9px', padding: '2px 6px', borderRadius: '4px',
+        border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer', color: MUTED, whiteSpace: 'nowrap',
+      });
+      chip.addEventListener('click', async () => {
+        try { await opts.audio.resume(); } catch { /* ignored */ }
+        opts.audio.play(a.id, { channel: 'sfx', volume: 0.8, fadeIn: 0.05, exclusive: true });
+      });
+      assetChips.set(a.id, chip);
+      grid.appendChild(chip);
+    }
+    content.appendChild(grid);
+    refreshAssets();
+  }
+  function refreshAssets(): void {
+    const playingIds = new Set(opts.audio.listPlaying().map((p) => p.id));
+    for (const [id, chip] of assetChips) {
+      const on = playingIds.has(id);
+      chip.style.color = on ? ACCENT : MUTED;
+      chip.style.borderColor = on ? ACCENT : 'rgba(255,255,255,0.15)';
+    }
   }
 
   function renderPlayingList(): void {
@@ -802,12 +999,22 @@ export function createInspector(opts: InspectorOpts): {
   }
 
   // ── audio event subscriptions ──────────────────────────────────────
-  const unsubPlay = devBus.on('audio:play', () => {
-    if (currentTab === 'audio') renderPlayingList();
-  });
-  const unsubStop = devBus.on('audio:stop', () => {
-    if (currentTab === 'audio') renderPlayingList();
-  });
+  const onAudioEvent = (): void => {
+    if (currentTab !== 'audio') return;
+    renderPlayingList();
+    refreshBeds();
+    refreshAssets();
+  };
+  const unsubPlay = devBus.on('audio:play', onAudioEvent);
+  const unsubStop = devBus.on('audio:stop', onAudioEvent);
+  // Live poll for bed/asset visuals (volume drags from elsewhere, state
+  // morph flipping which beds are authored). Only does work on the AUDIO
+  // tab; cheap no-op otherwise.
+  const audioPoll = window.setInterval(() => {
+    if (currentTab !== 'audio') return;
+    refreshBeds();
+    refreshAssets();
+  }, 200);
 
   // ── dev mode hide ──────────────────────────────────────────────────
   const unsubDev = onDevModeChange((on) => {
@@ -828,6 +1035,7 @@ export function createInspector(opts: InspectorOpts): {
       unsubDev();
       unsubGizmo();
       window.removeEventListener('keydown', onGizmoKey);
+      window.clearInterval(audioPoll);
       stopPerfLoop();
       root.remove();
     },
